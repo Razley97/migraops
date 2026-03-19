@@ -1,0 +1,17 @@
+{
+  "name": "migraops-backend",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "express-rate-limit": "^7.3.0",
+    "node-fetch": "^3.3.2"
+  }
+}
