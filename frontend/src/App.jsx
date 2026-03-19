@@ -887,7 +887,7 @@ function AppInner() {
     setProg(2);
     var phA=phaseStart("A","Codebase Analysis");
     audit.apiCalls++;
-    var cbCtx=await doCodebaseAnalysis(files,sL,sV,tL,tV,mod);
+    var cbCtx=await doCodebaseAnalysis(files,sL,sV,tL,tV,mod,{useChain:true,onAgentChange:function(agentId){setActiveAgent(agentId)}});
     phaseEnd(phA,cbCtx.ok?"done":"error",{detail:cbCtx.ok?(cbCtx.analysis.purpose||"OK"):"Error",ok:cbCtx.ok});
     setCbA(cbCtx);
     setLogs(function(p){return p.map(function(l){return l.phase==="analysis"?Object.assign({},l,{st:"done",detail:cbCtx.ok?(cbCtx.analysis.purpose||""):"Error",durationMs:Date.now()-l.ts}):l})});
@@ -1108,7 +1108,7 @@ function AppInner() {
       var progC=W.a+W.b+W.b2+Math.round((W.c+W.d)*(ii/(INT_MAX)))+2;
       setProg(progC);
       audit.apiCalls++;
-      intCheck=await doIntegrationCheck(files,rs,sL,sV,tL,tV,mod,uiL,prevCtx);
+      intCheck=await doIntegrationCheck(files,rs,sL,sV,tL,tV,mod,uiL,prevCtx,{useChain:true,onAgentChange:function(agentId){setActiveAgent(agentId)}});
       var intScore=intCheck.ok?(intCheck.result.score||0):0;
       var intIssues=intCheck.ok?(intCheck.result.issues||[]):[];
       var intAllIssues=intIssues.length;

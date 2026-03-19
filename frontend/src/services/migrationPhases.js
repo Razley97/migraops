@@ -159,7 +159,8 @@ export async function generateAndroidReport(files, sl, sv, tl, tv, mid, lang) {
 }
 
 // ═══ PHASE A: Codebase Analysis — understand the app before touching anything ═══
-export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid) {
+export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid,opts) {
+  var chainOpts=opts||{};
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
   var manifest=files.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
@@ -175,7 +176,16 @@ export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid) {
   var sys="You are a Principal Architect performing pre-migration analysis. Analyze this "+sn+" "+sv+" codebase that will be migrated to "+tn+" "+tv+". Map the ENTIRE system before any code is changed."+crossBlock+"\n\nFor EACH file, provide DETAILED migration notes:\n- List EVERY deprecated API call with its exact modern replacement\n- List EVERY import that needs to change and what it changes to\n- Identify async patterns (callbacks, promises, sync I/O) and the target async model\n- Note error handling patterns and how they map to "+tn+"\n- Identify class/function signatures that will change\n- Flag data structures that cross file boundaries\n\nCRITICAL: For each file, count processing signals in 'processingHints'. These DIRECTLY control the AI processing budget:\n- deprecatedAPIs: count of deprecated/legacy API calls that need replacement\n- asyncChanges: count of async pattern migrations (callbacks\u2192promises, sync\u2192async, etc.)\n- importChanges: count of import/require statements that need to change\n- structuralChanges: count of class/interface/inheritance changes\n- typeChanges: count of type system changes (adding types, changing generics, etc.)\n- errorHandling: count of try/catch/exception pattern changes\n- totalSignals: sum of all above \u2014 this determines how much processing power each file gets\n\nBe ACCURATE with counts \u2014 overcounting wastes resources, undercounting produces incomplete migrations.\n\nRespond ONLY valid JSON:\n{\"purpose\":\"what this app/service does\",\"architecture\":\"pattern (MVC/layered/microservice/etc)\",\"files\":[{\"name\":\"...\",\"role\":\"what this file does\",\"exports\":[\"public APIs/classes/functions\"],\"imports\":[\"what it depends on\"],\"migrationNotes\":\"DETAILED: every API change, every pattern shift, every import change\",\"complexity\":\"simple|moderate|complex\",\"estimatedChanges\":0,\"processingHints\":{\"deprecatedAPIs\":0,\"asyncChanges\":0,\"importChanges\":0,\"structuralChanges\":0,\"typeChanges\":0,\"errorHandling\":0,\"totalSignals\":0}}],\"dependencies\":[{\"from\":\"file\",\"to\":\"file\",\"type\":\"import|call|inherit|config\",\"detail\":\"...\"}],\"criticalPaths\":[\"sequence of calls that must work together\"],\"risks\":[{\"area\":\"...\",\"detail\":\"...\",\"severity\":\"high|medium|low\"}],\"migrationOrder\":[\"files in optimal migration order\"],\"sharedContracts\":[\"interfaces/types/schemas that span multiple files\"]"+fileMappingSchema+"}";
   var usr="Analyze this "+sn+" "+sv+" codebase ("+files.length+" files, "+files.reduce(function(s,f){return s+f.content.split("\n").length},0)+" total lines):\n\n"+manifest+"\n\nProvide DETAILED per-file migration notes. Each file's migrationNotes should be 3-5 sentences covering every API change, import change, and pattern migration needed.";
   try {
-    var txt=await callAgent('codebaseAnalysis',sys,usr,mid,4000,{timeout:60000});
+    var txt;
+    if (chainOpts.useChain) {
+      var secSys="Review the following codebase analysis for SECURITY concerns in the "+sn+" "+sv+" to "+tn+" "+tv+" migration. Identify: hardcoded secrets, injection vulnerabilities, insecure API usage, dependency risks. Enrich the analysis JSON by adding securityNotes per file and a top-level securityRisks array. Return the COMPLETE enriched JSON.";
+      txt=await callAgentChain([
+        {agentId:'architect',sys:sys,usr:usr,mid:mid,mt:4000,opts:{timeout:60000}},
+        {agentId:'security',sys:secSys,usr:'Review and enrich the analysis above. Return enriched JSON only.',mid:mid,mt:3000,opts:{timeout:60000}}
+      ],chainOpts.onAgentChange);
+    } else {
+      txt=await callAgent('codebaseAnalysis',sys,usr,mid,4000,{timeout:60000});
+    }
     var cl=safeParseJSON(txt);
     if(!cl)throw new Error("Invalid JSON response");
     return {ok:true,analysis:cl,isCross:isCross};
@@ -430,7 +440,8 @@ export async function doConsolidation(origFiles,migratedResults,sl,sv,tl,tv,mid,
 }
 
 // ═══ PHASE C: Integration Validation — comprehensive, regression-aware ═══
-export async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,mid,lang,prevContext) {
+export async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,mid,lang,prevContext,opts) {
+  var chainOpts=opts||{};
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"}; var ln=lnames[lang]||"Espa\u00f1ol";
@@ -453,7 +464,16 @@ export async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,m
   try {
     // Scale tokens: more files need more detailed layer analysis (8 layers x N files)
     var intCheckTokens=Math.min(6000,4000+migratedResults.length*400);
-    var txt=await callAgent('integrationCheck',sys,usr,mid,intCheckTokens);
+    var txt;
+    if (chainOpts.useChain) {
+      var secSys="Review the following integration check for a "+sn+" "+sv+" to "+tn+" "+tv+" migration. Focus on SECURITY: SQL injection, XSS, resource leaks, auth bypasses. Add security issues to the issues array with category:security. Return COMPLETE enriched JSON.";
+      txt=await callAgentChain([
+        {agentId:'qa',sys:sys,usr:usr,mid:mid,mt:intCheckTokens,opts:{timeout:75000}},
+        {agentId:'security',sys:secSys,usr:'Audit the integration check above for security concerns. Return enriched JSON.',mid:mid,mt:3000,opts:{timeout:60000}}
+      ],chainOpts.onAgentChange);
+    } else {
+      txt=await callAgent('integrationCheck',sys,usr,mid,intCheckTokens);
+    }
     var parsed=safeParseJSON(txt);
     if(!parsed)throw new Error("Invalid JSON response");
     if (parsed.layers&&parsed.layers.length>=6) {
