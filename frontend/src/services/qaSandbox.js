@@ -1,7 +1,7 @@
 // ═══ QA SANDBOX TESTING SYSTEM (v4.5) ═══
 // Generates test cases via Claude, translates functions to JS, executes in browser sandbox
 
-import { callClaude } from "./claudeClient.js";
+import { callAgent } from "./agentClient.js";
 import { safeParseJSON } from "./utils.js";
 import { LANGS } from "../config/languages.js";
 
@@ -22,22 +22,120 @@ export async function generateTestSuite(files, lang, ver, mid) {
   var usr="Analyze this "+ln+" "+ver+" codebase and generate a test suite with executable JS translations:\n\n"+manifest+"\n\nGenerate 3-5 test cases per function. JS translations MUST be executable with new Function(). Include edge cases (null, empty, zero). JSON only.";
 
   try {
-    var txt=await callClaude(sys,usr,mid,8000,{timeout:75000});
+    var txt=await callAgent('review',sys,usr,mid,8000,{timeout:75000});
     var parsed=safeParseJSON(txt);
     if(!parsed||!parsed.tests)throw new Error("Invalid test suite JSON");
     return {ok:true,suite:parsed};
   } catch(e) { return {ok:false,error:e.message}; }
 }
 
+// Worker source for isolated code execution
+var WORKER_SRC = '(' + function() {
+  self.onmessage = function(e) {
+    var jsCode = e.data.jsCode;
+    var testCases = e.data.testCases;
+    var MAX_TEST_MS = 3000;
+    var results = [];
+    var fn = null;
+
+    try {
+      fn = new Function('"use strict";\n' + jsCode)();
+      if (typeof fn !== "function") throw new Error("JS translation did not return a function");
+    } catch(compileErr) {
+      testCases.forEach(function(tc) {
+        results.push({input:tc.input,expected:tc.expected,actual:null,pass:false,skipped:true,error:"Compile: "+compileErr.message,label:tc.label,timeMs:0});
+      });
+      self.postMessage({results: results});
+      return;
+    }
+
+    testCases.forEach(function(tc) {
+      var startMs = performance.now();
+      try {
+        var input;
+        try { input = typeof tc.input === "string" ? JSON.parse(tc.input) : tc.input; }
+        catch(e) { input = tc.input; }
+
+        var actual = Array.isArray(input) ? fn.apply(null, input) : fn(input);
+        var elapsed = Math.round((performance.now() - startMs) * 100) / 100;
+
+        if (elapsed > MAX_TEST_MS) {
+          results.push({input:tc.input,expected:tc.expected,actual:actual,pass:false,skipped:false,error:"Slow: "+elapsed+"ms",label:tc.label,timeMs:elapsed});
+          return;
+        }
+
+        var expected;
+        try { expected = typeof tc.expected === "string" ? JSON.parse(tc.expected) : tc.expected; }
+        catch(e) { expected = tc.expected; }
+
+        var actualStr = JSON.stringify(actual);
+        var expectedStr = JSON.stringify(expected);
+        var pass = actualStr === expectedStr;
+        if (!pass && typeof actual === "number" && typeof expected === "number") pass = Math.abs(actual - expected) < 0.0001;
+        if (!pass && typeof actual === "string" && typeof expected === "string") pass = actual.trim() === expected.trim();
+
+        results.push({input:tc.input,expected:tc.expected,actual:actual,actualStr:actualStr,expectedStr:expectedStr,pass:pass,skipped:false,error:null,label:tc.label,timeMs:elapsed});
+      } catch(runErr) {
+        var elapsed2 = Math.round((performance.now() - startMs) * 100) / 100;
+        results.push({input:tc.input,expected:tc.expected,actual:null,pass:false,skipped:false,error:runErr.message,label:tc.label,timeMs:elapsed2});
+      }
+    });
+    self.postMessage({results: results});
+  };
+} + ')()';
+
+var WORKER_TIMEOUT = 5000; // 5s total timeout for worker
+
 export function executeSandbox(jsCode, testCases) {
-  // Execute a JS function translation against test cases in a safe sandbox
+  // Execute in isolated Web Worker with timeout
+  return new Promise(function(resolve) {
+    var blob, url, worker;
+    try {
+      blob = new Blob([WORKER_SRC], {type: 'application/javascript'});
+      url = URL.createObjectURL(blob);
+      worker = new Worker(url);
+    } catch(e) {
+      // Fallback to main thread if Workers not available
+      resolve(executeSandboxSync(jsCode, testCases));
+      return;
+    }
+
+    var timer = setTimeout(function() {
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      var results = testCases.map(function(tc) {
+        return {input:tc.input,expected:tc.expected,actual:null,pass:false,skipped:true,error:"Worker timeout ("+WORKER_TIMEOUT+"ms)",label:tc.label,timeMs:WORKER_TIMEOUT};
+      });
+      resolve(results);
+    }, WORKER_TIMEOUT);
+
+    worker.onmessage = function(e) {
+      clearTimeout(timer);
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      resolve(e.data.results || []);
+    };
+
+    worker.onerror = function(err) {
+      clearTimeout(timer);
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      var results = testCases.map(function(tc) {
+        return {input:tc.input,expected:tc.expected,actual:null,pass:false,skipped:true,error:"Worker error: "+(err.message||"unknown"),label:tc.label,timeMs:0};
+      });
+      resolve(results);
+    };
+
+    worker.postMessage({jsCode: jsCode, testCases: testCases});
+  });
+}
+
+// Synchronous fallback for environments without Worker support
+function executeSandboxSync(jsCode, testCases) {
   var results=[];
   var fn=null;
-  var MAX_TEST_MS=3000; // 3s max per test case — prevents infinite loops
-
-  // Compile the function
+  var MAX_TEST_MS=3000;
   try {
-    // Wrap in strict mode for safer execution
     fn=new Function('"use strict";\n'+jsCode)();
     if(typeof fn!=="function") throw new Error("JS translation did not return a function");
   } catch(compileErr) {
@@ -46,46 +144,23 @@ export function executeSandbox(jsCode, testCases) {
     });
     return results;
   }
-
-  // Execute each test case with timeout protection
   testCases.forEach(function(tc) {
     var startMs=performance.now();
     try {
-      // Parse input safely
       var input;
       try { input=typeof tc.input==="string"?JSON.parse(tc.input):tc.input; }
-      catch(parseErr) { input=tc.input; }
-
-      // Execute with implicit timeout check (can't truly timeout sync JS, but we track time)
+      catch(e) { input=tc.input; }
       var actual=Array.isArray(input)?fn.apply(null,input):fn(input);
       var elapsed=Math.round((performance.now()-startMs)*100)/100;
-
-      // If it took too long, flag it
-      if(elapsed>MAX_TEST_MS) {
-        results.push({input:tc.input,expected:tc.expected,actual:actual,pass:false,skipped:false,error:"Slow: "+elapsed+"ms (limit "+MAX_TEST_MS+"ms)",label:tc.label,timeMs:elapsed});
-        return;
-      }
-
-      // Parse expected safely
+      if(elapsed>MAX_TEST_MS) { results.push({input:tc.input,expected:tc.expected,actual:actual,pass:false,skipped:false,error:"Slow: "+elapsed+"ms",label:tc.label,timeMs:elapsed}); return; }
       var expected;
       try { expected=typeof tc.expected==="string"?JSON.parse(tc.expected):tc.expected; }
-      catch(parseErr) { expected=tc.expected; }
-
-      // Deep compare with tolerance for floating point
+      catch(e) { expected=tc.expected; }
       var actualStr=JSON.stringify(actual);
       var expectedStr=JSON.stringify(expected);
       var pass=actualStr===expectedStr;
-
-      // Fuzzy match for numbers with floating point tolerance
-      if(!pass&&typeof actual==="number"&&typeof expected==="number") {
-        pass=Math.abs(actual-expected)<0.0001;
-      }
-
-      // Fuzzy match for strings (trim whitespace)
-      if(!pass&&typeof actual==="string"&&typeof expected==="string") {
-        pass=actual.trim()===expected.trim();
-      }
-
+      if(!pass&&typeof actual==="number"&&typeof expected==="number") pass=Math.abs(actual-expected)<0.0001;
+      if(!pass&&typeof actual==="string"&&typeof expected==="string") pass=actual.trim()===expected.trim();
       results.push({input:tc.input,expected:tc.expected,actual:actual,actualStr:actualStr,expectedStr:expectedStr,pass:pass,skipped:false,error:null,label:tc.label,timeMs:elapsed});
     } catch(runErr) {
       var elapsed2=Math.round((performance.now()-startMs)*100)/100;
@@ -95,7 +170,7 @@ export function executeSandbox(jsCode, testCases) {
   return results;
 }
 
-function runTestSuite(suite) {
+async function runTestSuite(suite) {
   // Run all tests in the suite and return structured results
   if(!suite||!suite.tests)return {tests:[],summary:{passed:0,failed:0,skipped:0,total:0,timeMs:0}};
 
@@ -103,8 +178,9 @@ function runTestSuite(suite) {
   var totalTime=0;
   var passed=0,failed=0,skipped=0;
 
-  suite.tests.forEach(function(test) {
-    var caseResults=executeSandbox(test.jsFunction,test.cases||[]);
+  for (var ti=0; ti<suite.tests.length; ti++) {
+    var test=suite.tests[ti];
+    var caseResults=await executeSandbox(test.jsFunction,test.cases||[]);
     var testPassed=caseResults.every(function(r){return r.pass||r.skipped});
     var testSkipped=caseResults.every(function(r){return r.skipped});
     var testTime=caseResults.reduce(function(s,r){return s+r.timeMs},0);
@@ -127,7 +203,7 @@ function runTestSuite(suite) {
       cases:caseResults,
       timeMs:Math.round(testTime*100)/100
     });
-  });
+  }
 
   return {
     tests:allResults,
