@@ -1,5 +1,17 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import React from "react";
+import { THEMES } from "./config/themes.js";
+import { UILANGS, LANGS, CROSS, TARGET_EXT, MODULE_CONVENTIONS } from "./config/languages.js";
+import { MODELS } from "./config/models.js";
+import { i18n } from "./i18n/translations.js";
+import ChatView from "./components/chat/ChatView.jsx";
+import GitHubPanel from "./components/github/GitHubPanel.jsx";
+import { safeParseJSON, mkDiff, mkRisks, syntaxHL } from "./services/utils.js";
+import { AGENTS } from "./data/agents.js";
+import { PARADIGM_MAPS, getParadigmMap } from "./config/paradigmMaps.js";
+import { callClaude, calcCapacity, _tks, _cancelled, _activeController, setCancelled, setActiveController, resetTks } from "./services/claudeClient.js";
+import { generateTestSuite, executeSandbox, generateAndRunQA } from "./services/qaSandbox.js";
+import { mapTargetFile, detectVer, doDeepAnalysis, generateAndroidReport, doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation, doIntegrationCheck, doIntegrationFix, doReview, doFixPlan, SCORING_RUBRIC } from "./services/migrationPhases.js";
 
 // Error Boundary — prevents total app crash on render errors
 class ErrorBoundary extends React.Component {
@@ -10,7 +22,7 @@ class ErrorBoundary extends React.Component {
       return React.createElement("div",{style:{padding:40,textAlign:"center",fontFamily:"system-ui"}},
         React.createElement("h2",{style:{color:"#dc2626",marginBottom:12}},"⚠️ MigraOps — Error de Render"),
         React.createElement("p",{style:{color:"#64748b",marginBottom:16}},String(this.state.error)),
-        React.createElement("button",{onClick:function(){window.location.reload()},style:{padding:"8px 20px",borderRadius:8,border:"none",background:"#60A5FA",color:"#fff",cursor:"pointer",fontWeight:700,borderRadius:10,fontFamily:"Outfit,sans-serif"}},"Recargar Aplicación")
+        React.createElement("button",{onClick:function(){window.location.reload()},style:{padding:"8px 20px",borderRadius:10,border:"none",background:"#60A5FA",color:"#fff",cursor:"pointer",fontWeight:700,fontFamily:"Outfit,sans-serif"}},"Recargar Aplicación")
       );
     }
     return this.props.children;
@@ -22,1513 +34,20 @@ var SII_LOGO="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADUAAAAoCAIAAADRzCVi
 var SII_LOGO_LG="data:image/png;base64,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";
 
 
-var i18n = {
-  es: {
-    sub:"Code Intelligence Platform",upload:"Subir",config:"Configurar",results:"Resultados",
-    history:"Historial",testProj:"Proyectos de Prueba",testDesc:"Multi-archivo — selecciona un proyecto",
-    drag:"Arrastra archivos o haz clic para subir",files:"archivo(s)",clean:"Limpiar",
-    detected:"Auto-detectado",lowConf:"Baja confianza",auto:"Auto",
-    cfgMig:"Configurar Migración",cfg:"Configuración",aiCfg:"Configuración Avanzada de IA",
-    aiDesc2:"Metodología Senior — Prompts de nivel Staff/Principal Engineer",migP:"Prompt de Migración (6 Fases + 10 Directivas)",revP:"Prompt de Revisión QA (8 Dimensiones + 12 Criterios)",
-    sysP:"PROMPT DEL SISTEMA (Staff Engineer Methodology)",guide:"DIRECTIVAS DE MIGRACIÓN (10 fases secuenciales)",crit:"CRITERIOS DE VALIDACIÓN (12 dimensiones especializadas)",
-    vars:"Variables:",reset:"Restablecer",type:"Tipo de migración",
-    updVer:"Actualizar Versión",chgLang:"Cambiar Lenguaje",origin:"Origen",dest:"Destino",
-    selVer:"Seleccionar versión...",selLang:"Seleccionar lenguaje...",
-    model:"Modelo",summary:"Resumen",migrate:"Migrar",done:"Completado",
-    dlAll:"Descargar Todo",newMig:"Nueva Migración",risks:"Riesgos",
-    filesLbl:"ARCHIVOS",changes:"cambios",orig:"Original",mig:"Migrado",
-    validate:"Análisis Adicional",static:"Análisis Profundo",aiRev:"Revisión QA Senior",
-    staticD:"8 capas: arquitectura, seguridad, async, tipos, performance",aiD:"8 dimensiones ponderadas: funcional, sintaxis, idiomática, async, seguridad, errores, contratos, docs",
-    ok:"Aprobado",obs:"Con observaciones",rej:"Rechazado",
-    errs:"Errores",warns:"Advertencias",good:"Bien hecho",score:"Puntuación",
-    reviewing:"Claude analizando en profundidad...",noHist:"Sin migraciones aún",
-    lines:"líneas",adv:"Avanzado",inter:"Intermedio",
-    hi:"Alto",med:"Medio",lo:"Bajo",qual:"CALIDAD",spd:"VELOCIDAD",view:"Ver",
-    fixBtn:"Generar Solución Completa",fixBtnShort:"Generar Solución",fixing:"Generando solución con IA...",
-    fixPlan:"PLAN DE ACCIÓN",fixCode:"CÓDIGO CORREGIDO",fixCheck:"CHECKLIST DE VERIFICACIÓN",
-    fixTitle:"Solución Generada por IA",fixApply:"Aplicar Corrección",fixDl:"Descargar Corregido",
-    fixClose:"Cerrar",fixEmpty:"Sin errores — no se requiere plan de acción",
-    dimEval:"DIMENSIONES DE EVALUACIÓN",
-    deepLayers:"CAPAS DE ANÁLISIS",deepCrit:"HALLAZGOS CRÍTICOS",deepImpr:"MEJORAS SUGERIDAS",
-    deepStr:"FORTALEZAS",deepAnalyzing:"Análisis profundo en curso...",
-    deepDesc:"Claude analiza arquitectura, seguridad, async, tipos, performance y contrato API",
-    revDesc:"Claude evalúa funcionalidad, sintaxis, idiomática, seguridad y documentación",
-    stepReview:"1. Revisar",stepFix:"2. Corregir",stepApply:"3. Aplicar",
-    noIssues:"Sin hallazgos críticos",issuesFound:"hallazgos encontrados",
-    genSolution:"Quieres que Claude genere la solución?",
-    pass:"Pasa",warn:"Advertencia",fail:"Falla",
-    ph1:"Migrando código",ph2:"Auto-revisión IA",ph3:"Corrigiendo errores",ph4:"Verificación final",
-    phClean:"Sin errores",phFixed:"corregidos",phIter:"iteración",phScore:"puntos",
-    pipeDesc:"Migración rápida + validación de integración completa",
-    optDesc:"El código ya fue revisado y corregido. Estas herramientas son para análisis adicional opcional",
-    gPhA:"Analizando aplicación",gPhB:"Migrando archivos",gPhB2:"Consolidando archivos",gPhB2a:"Auditoría de dependencias",gPhB2b:"Corrigiendo conexiones",gPhC:"Validación de integración",gPhD:"Corrección de integración",
-    gPhAd:"Entendiendo arquitectura, dependencias y contratos",gPhBd:"Migración con contexto de arquitectura por archivo",
-    gPhCd:"Verificando que todo funcione junto",gPhDd:"Corrigiendo problemas entre archivos",
-    mgHdr:"Migración en curso",mgElapsed:"Transcurrido",mgRemain:"Restante",mgModel:"Modelo",
-    mgFiles:"Archivos",mgApiCalls:"Llamadas API",mgThroughput:"Rendimiento",mgQueue:"Cola de archivos",
-    mgPending:"Pendiente",mgActive:"Migrando",mgPlanning:"Planificando",mgCompleted:"Completado",mgActivity:"Actividad",
-    mgFilesPerMin:"arch/min",mgLinesProcessed:"líneas procesadas",mgPhase:"Fase actual",
-    mgWaiting:"En espera",mgNoFiles:"Sin archivos aún",cancel:"Cancelar",timeLimit:"Límite: 8 min",
-    mgTokens:"Tokens",mgCost:"Costo est.",crossLang:"Cross-Language",verUpg:"Actualización",mgModSys:"Sistema de módulos",mgLastChg:"Último cambio",
-    rcTitle:"Reporte de Migración",rcGrade:"Calificación",rcIter:"Iteraciones",rcFixed:"Correcciones",rcTime:"Tiempo total",rcArch:"Arquitectura",rcRisks:"Riesgos detectados",rcVerified:"Verificados",rcPipeline:"Pipeline",
-    intTitle:"Reporte de Integración",intPass:"Integración validada",intFail:"Problemas de integración",
-    intVerified:"Verificaciones correctas",intIssues:"Problemas detectados",
-    cbTitle:"Análisis del Codebase",cbArch:"Arquitectura",cbPurpose:"Propósito",cbDeps:"Dependencias",cbRisks:"Riesgos identificados",
-    intIter:"Iteración de integración",intFixing:"Corrigiendo integración",intRecheck:"Re-verificando integración",intTarget:"Objetivo: 95/100",
-    audit:"Auditoría",auditTitle:"Registro de Auditoría",auditDesc:"Trazabilidad completa de tiempos por fase",
-    auditTotal:"Tiempo Total",auditPhase:"Fase",auditDuration:"Duración",auditStart:"Inicio",auditEnd:"Fin",
-    auditStatus:"Estado",auditDetail:"Detalle",auditFile:"Archivo",auditExport:"Exportar JSON",
-    auditConfig:"Configuración",auditTimeline:"Línea de Tiempo",auditSummary:"Resumen de Tiempos",
-    auditCalls:"Llamadas API",auditAvg:"Promedio",auditSlowest:"Más lento",auditFastest:"Más rápido",
-    auditDistrib:"Distribución de Tiempos",auditScoreEvol:"Evolución del Score",auditFileComp:"Tiempo por Archivo",
-    auditPipeline:"Pipeline de Ejecución",auditEfficiency:"Eficiencia",auditOverhead:"Overhead IA",
-    auditPhDesc:"Descripción de Fase",auditIssuesDelta:"Delta de Issues",auditTokenEst:"Tokens Est.",
-    auditFixRate:"Tasa de Corrección",auditPhases:"fases completadas",auditIter:"iteraciones",
-    rollback:"Rollback — fix empeoró resultado, restaurando versión anterior",
-    stall:"Estancamiento — score no mejora, deteniendo ciclo",
-    pdfExport:"Exportar PDF",pdfGen:"Generando PDF...",pdfTitle:"Reporte de Migración",
-    pdfExecSum:"Resumen Ejecutivo",pdfConfig:"Configuración",pdfIntReport:"Reporte de Integración",
-    pdfAuditTrail:"Auditoría de Tiempos",pdfRisks:"Análisis de Riesgos",pdfFiles:"Archivos Migrados",
-    pdfGenBy:"Generado por",pdfDate:"Fecha",pdfScore:"Puntuación",pdfVerdict:"Veredicto",
-    pdfIssues:"Problemas",pdfVerified:"Verificaciones",pdfPhase:"Fase",pdfDuration:"Duración",
-    pdfChanges:"Cambios Detectados",pdfModel:"Modelo Utilizado",pdfTotalTime:"Tiempo Total",
-    pdfApiCalls:"Llamadas API",pdfConfidential:"CONFIDENCIAL — SII Group Chile",
-    dropTitle:"Suelta tu código fuente aquí",orBrowse:"o busca archivos",supportedLangs:"Lenguajes soportados",
-    readyCfg:"Configurar migración",samples:"Proyectos de ejemplo",samplesDesc:"Proyectos demo para pruebas",
-    linesCode:"líneas de código",filesSel:"archivos seleccionados",detectedAs:"detectado como",
-    pMaps:"Mapeos de Paradigma",pMapsDesc:"Traducciones API concretas para migraciones cross-language",
-    pStdlib:"Traducciones de Stdlib",pPatterns:"Patrones de Código",pModules:"Sistema de Módulos",pAsync:"Modelo Async",pTypes:"Sistema de Tipos",
-    pMapsNone:"Sin mapeo disponible para este par de lenguajes",pMapsActive:"Activo para",pConns:"conexiones",pIssues:"problemas",pBroken:"rotas",
-    andTitle:"Análisis Android",andArch:"Arquitectura",andDeprecated:"APIs Obsoletas",andCompose:"Migración Compose",andSecurity:"Seguridad Android",andGradle:"Dependencias Gradle",andRefactor:"Plan de Refactorización",andModular:"Modularización",andReport:"Reporte Pre-Migración",andDownload:"Descargar Reporte",andBreach:"Brechas Detectadas",andPlan:"Plan de Acción",andLibs:"Actualización de Librerías",andPattern:"Patrón Detectado",andTarget:"Patrón Objetivo",andImpact:"Impacto",andEffort:"Esfuerzo",andPriority:"Prioridad",andCritical:"Crítico",andMajor:"Mayor",andMinor:"Menor",andXmlViews:"XML Views",andComposeTarget:"Jetpack Compose",andMvp:"MVP/MVC Legacy",andMvvm:"MVVM + Clean",andAsyncTask:"AsyncTask (obsoleto)",andCoroutines:"Coroutines",andKotlinVer:"Versión Kotlin",andAndroidApi:"API Android",andMinSdk:"Min SDK",andTargetSdk:"Target SDK",andJetpack:"Jetpack Libraries",andBreachSummary:"Resumen de Brechas",andNoBreaches:"Sin brechas detectadas",andGenReport:"Generar Reporte",andReportReady:"Reporte listo",andViewReport:"Ver Reporte",andExportHtml:"Exportar HTML",
-    qaTitle:"QA Sandbox",qaRun:"Ejecutar Tests",qaRunning:"Ejecutando...",qaPreTitle:"Tests Pre-Migración",qaPostTitle:"Tests Post-Migración",qaPassed:"Pasaron",qaFailed:"Fallaron",qaSkipped:"Omitidos",qaCompare:"Comparar Pre vs Post",qaRetest:"Re-testear Migrado",qaNoTests:"Sin tests generados aún",qaGenerate:"Generar Test Suite",qaTotal:"Total tests",qaIdentical:"Resultados idénticos",qaRegression:"Regresión detectada",qaNewPass:"Nuevo éxito",qaExecTime:"Tiempo ejecución",qaInput:"Entrada",qaExpected:"Esperado",qaActual:"Resultado",qaUnit:"Unitario",qaInteg:"Integración",qaApi:"API",qaFunc:"Función",qaFile:"Archivo",qaCoverage:"Cobertura",qaExport:"Exportar Tests",qaSandbox:"Sandbox (ejecución real)",qaVirtual:"Virtual (análisis IA)",qaVDesc:"Claude analiza y predice el comportamiento de cada función",qaVTrace:"Traza de ejecución",qaVPredicted:"Predicho",qaVConfidence:"Confianza",qaVHigh:"Alta",qaVMed:"Media",qaVLow:"Baja",qaVSideEffects:"Efectos secundarios",qaVBehavior:"Comportamiento",qaVEquivalent:"Equivalente",qaVDifferent:"Diferente",qaVTab:"Vista",dashTitle:"Dashboard",dashWelcome:"Bienvenido",dashNewMig:"Nueva Migración",dashTotalMig:"Migraciones",dashAvgScore:"Score Promedio",dashFilesProc:"Archivos",dashRecent:"Actividad Reciente",dashNoData:"Sin migraciones aún",dashStart:"Comenzar",sideNew:"Nueva Migración",sideDash:"Dashboard",sideResults:"Resultados",sideHist:"Historial",sideQA:"QA Tests",sideCfg:"Config. IA",loginWelcome:"Bienvenido a",loginName:"Tu nombre",loginBtn:"Ingresar",step1:"Arquivos",step2:"Configurar",step3:"Migrar",step4:"Resultados",step1:"Archivos",step2:"Configurar",step3:"Migrar",step4:"Resultados",
-    localFiles:"Archivos Locales",localFilesDesc:"Sube .zip o archivos de código desde tu computador",ghRepoL:"Repositorio GitHub",ghRepoDesc:"Importa archivos directamente desde cualquier repo",strengths2:"Fortalezas",migrateTo2:"Migrar a",scoreTrend:"Tendencia de Scores",noMigYet:"Sin migraciones aún",noMigDesc:"Inicia tu primera migración para ver estadísticas aquí",preview2:"Vista previa",copyCode:"Copiar",riskScore2:"RIESGO",readiness2:"PREPARACIÓN",qualityLayers:"Capas de Calidad"
-  },
-  en: {
-    sub:"Code Intelligence Platform",upload:"Upload",config:"Configure",results:"Results",
-    history:"History",testProj:"Test Projects",testDesc:"Multi-file — select a project",
-    drag:"Drag files or click to upload",files:"file(s)",clean:"Clear",
-    detected:"Auto-detected",lowConf:"Low confidence",auto:"Auto",
-    cfgMig:"Configure Migration",cfg:"Configuration",aiCfg:"Advanced AI Configuration",
-    aiDesc2:"Senior Methodology — Staff/Principal Engineer level prompts",migP:"Migration Prompt (6 Phases + 10 Directives)",revP:"QA Review Prompt (8 Dimensions + 12 Criteria)",
-    sysP:"SYSTEM PROMPT (Staff Engineer Methodology)",guide:"MIGRATION DIRECTIVES (10 sequential phases)",crit:"VALIDATION CRITERIA (12 specialized dimensions)",
-    vars:"Variables:",reset:"Reset",type:"Migration type",
-    updVer:"Update Version",chgLang:"Change Language",origin:"Source",dest:"Target",
-    selVer:"Select version...",selLang:"Select language...",
-    model:"Model",summary:"Summary",migrate:"Migrate",done:"Completed",
-    dlAll:"Download All",newMig:"New Migration",risks:"Risks",
-    filesLbl:"FILES",changes:"changes",orig:"Original",mig:"Migrated",
-    validate:"Additional Analysis",static:"Deep Analysis",aiRev:"Senior QA Review",
-    staticD:"8 layers: architecture, security, async, types, performance",aiD:"8 weighted dimensions: functional, syntax, idiomatic, async, security, errors, contracts, docs",
-    ok:"Approved",obs:"With observations",rej:"Rejected",
-    errs:"Errors",warns:"Warnings",good:"Well done",score:"Score",
-    reviewing:"Claude performing deep analysis...",noHist:"No migrations yet",
-    lines:"lines",adv:"Advanced",inter:"Intermediate",
-    hi:"High",med:"Medium",lo:"Low",qual:"QUALITY",spd:"SPEED",view:"View",
-    fixBtn:"Generate Complete Solution",fixBtnShort:"Generate Solution",fixing:"Generating AI solution...",
-    fixPlan:"ACTION PLAN",fixCode:"CORRECTED CODE",fixCheck:"VERIFICATION CHECKLIST",
-    fixTitle:"AI-Generated Solution",fixApply:"Apply Fix",fixDl:"Download Fixed",
-    fixClose:"Close",fixEmpty:"No errors — action plan not needed",
-    dimEval:"EVALUATION DIMENSIONS",
-    deepLayers:"ANALYSIS LAYERS",deepCrit:"CRITICAL FINDINGS",deepImpr:"SUGGESTED IMPROVEMENTS",
-    deepStr:"STRENGTHS",deepAnalyzing:"Deep analysis in progress...",
-    deepDesc:"Claude analyzes architecture, security, async, types, performance and API contract",
-    revDesc:"Claude evaluates 8 dimensions: functional equivalence, syntax, idiomatic quality, async correctness, security, error handling, API contracts, documentation",
-    stepReview:"1. Review",stepFix:"2. Fix",stepApply:"3. Apply",
-    noIssues:"No critical findings",issuesFound:"findings detected",
-    genSolution:"Want Claude to generate the solution?",
-    pass:"Pass",warn:"Warning",fail:"Fail",
-    ph1:"Migrating code",ph2:"AI self-review",ph3:"Fixing errors",ph4:"Final verification",
-    phClean:"No errors",phFixed:"fixed",phIter:"iteration",phScore:"points",
-    pipeDesc:"Migration with automatic integrated review and correction",
-    optDesc:"Code was already auto-reviewed and fixed. These tools are for optional additional analysis",
-    gPhA:"Analyzing application",gPhB:"Migrating files",gPhB2:"Consolidating files",gPhB2a:"Dependency audit",gPhB2b:"Fixing connections",gPhC:"Integration validation",gPhD:"Integration fix",
-    gPhAd:"Understanding architecture, dependencies and contracts",gPhBd:"Context-aware migration per file",
-    gPhCd:"Verifying everything works together",gPhDd:"Fixing cross-file issues",
-    mgHdr:"Migration in progress",mgElapsed:"Elapsed",mgRemain:"Remaining",mgModel:"Model",
-    mgFiles:"Files",mgApiCalls:"API Calls",mgThroughput:"Throughput",mgQueue:"File queue",
-    mgPending:"Pending",mgActive:"Migrating",mgPlanning:"Planning",mgCompleted:"Completed",mgActivity:"Activity",
-    mgFilesPerMin:"files/min",mgLinesProcessed:"lines processed",mgPhase:"Current phase",
-    mgWaiting:"Waiting",mgNoFiles:"No files yet",cancel:"Cancel",timeLimit:"Limit: 8 min",
-    mgTokens:"Tokens",mgCost:"Est. cost",crossLang:"Cross-Language",verUpg:"Version Upgrade",mgModSys:"Module system",mgLastChg:"Last change",
-    rcTitle:"Migration Report",rcGrade:"Grade",rcIter:"Iterations",rcFixed:"Fixes applied",rcTime:"Total time",rcArch:"Architecture",rcRisks:"Risks detected",rcVerified:"Verified",rcPipeline:"Pipeline",
-    intTitle:"Integration Report",intPass:"Integration validated",intFail:"Integration issues",
-    intVerified:"Verified checks",intIssues:"Issues detected",
-    cbTitle:"Codebase Analysis",cbArch:"Architecture",cbPurpose:"Purpose",cbDeps:"Dependencies",cbRisks:"Identified risks",
-    intIter:"Integration iteration",intFixing:"Fixing integration",intRecheck:"Re-verifying integration",intTarget:"Target: 95/100",
-    audit:"Audit",auditTitle:"Audit Log",auditDesc:"Complete phase timing traceability",
-    auditTotal:"Total Time",auditPhase:"Phase",auditDuration:"Duration",auditStart:"Start",auditEnd:"End",
-    auditStatus:"Status",auditDetail:"Detail",auditFile:"File",auditExport:"Export JSON",
-    auditConfig:"Configuration",auditTimeline:"Timeline",auditSummary:"Time Summary",
-    auditCalls:"API Calls",auditAvg:"Average",auditSlowest:"Slowest",auditFastest:"Fastest",
-    auditDistrib:"Time Distribution",auditScoreEvol:"Score Evolution",auditFileComp:"Time per File",
-    auditPipeline:"Execution Pipeline",auditEfficiency:"Efficiency",auditOverhead:"AI Overhead",
-    auditPhDesc:"Phase Description",auditIssuesDelta:"Issues Delta",auditTokenEst:"Est. Tokens",
-    auditFixRate:"Fix Rate",auditPhases:"phases completed",auditIter:"iterations",
-    rollback:"Rollback — fix worsened result, restoring previous version",
-    stall:"Stalled — score not improving, stopping loop",
-    pdfExport:"Export PDF",pdfGen:"Generating PDF...",pdfTitle:"Migration Report",
-    pdfExecSum:"Executive Summary",pdfConfig:"Configuration",pdfIntReport:"Integration Report",
-    pdfAuditTrail:"Audit Trail",pdfRisks:"Risk Analysis",pdfFiles:"Migrated Files",
-    pdfGenBy:"Generated by",pdfDate:"Date",pdfScore:"Score",pdfVerdict:"Verdict",
-    pdfIssues:"Issues",pdfVerified:"Verified",pdfPhase:"Phase",pdfDuration:"Duration",
-    pdfChanges:"Detected Changes",pdfModel:"Model Used",pdfTotalTime:"Total Time",
-    pdfApiCalls:"API Calls",pdfConfidential:"CONFIDENTIAL — SII Group Chile",
-    dropTitle:"Drop your source code here",orBrowse:"or browse files",supportedLangs:"Supported languages",
-    readyCfg:"Configure migration",samples:"Sample Projects",samplesDesc:"Demo projects for testing",
-    linesCode:"lines of code",filesSel:"files selected",detectedAs:"detected as",
-    pMaps:"Paradigm Maps",pMapsDesc:"Concrete API translations for cross-language migrations",
-    pStdlib:"Stdlib Translations",pPatterns:"Code Patterns",pModules:"Module System",pAsync:"Async Model",pTypes:"Type System",
-    pMapsNone:"No mapping available for this language pair",pMapsActive:"Active for",pConns:"connections",pIssues:"issues",pBroken:"broken",
-    andTitle:"Android Analysis",andArch:"Architecture",andDeprecated:"Deprecated APIs",andCompose:"Compose Migration",andSecurity:"Android Security",andGradle:"Gradle Dependencies",andRefactor:"Refactoring Plan",andModular:"Modularization",andReport:"Pre-Migration Report",andDownload:"Download Report",andBreach:"Detected Breaches",andPlan:"Action Plan",andLibs:"Library Updates",andPattern:"Detected Pattern",andTarget:"Target Pattern",andImpact:"Impact",andEffort:"Effort",andPriority:"Priority",andCritical:"Critical",andMajor:"Major",andMinor:"Minor",andXmlViews:"XML Views",andComposeTarget:"Jetpack Compose",andMvp:"MVP/MVC Legacy",andMvvm:"MVVM + Clean",andAsyncTask:"AsyncTask (deprecated)",andCoroutines:"Coroutines",andKotlinVer:"Kotlin Version",andAndroidApi:"Android API",andMinSdk:"Min SDK",andTargetSdk:"Target SDK",andJetpack:"Jetpack Libraries",andBreachSummary:"Breach Summary",andNoBreaches:"No breaches detected",andGenReport:"Generate Report",andReportReady:"Report ready",andViewReport:"View Report",andExportHtml:"Export HTML",
-    qaTitle:"QA Sandbox",qaRun:"Run Tests",qaRunning:"Running...",qaPreTitle:"Pre-Migration Tests",qaPostTitle:"Post-Migration Tests",qaPassed:"Passed",qaFailed:"Failed",qaSkipped:"Skipped",qaCompare:"Compare Pre vs Post",qaRetest:"Re-test Migrated",qaNoTests:"No tests generated yet",qaGenerate:"Generate Test Suite",qaTotal:"Total tests",qaIdentical:"Identical results",qaRegression:"Regression detected",qaNewPass:"New pass",qaExecTime:"Exec time",qaInput:"Input",qaExpected:"Expected",qaActual:"Actual",qaUnit:"Unit",qaInteg:"Integration",qaApi:"API",qaFunc:"Function",qaFile:"File",qaCoverage:"Coverage",qaExport:"Export Tests",qaSandbox:"Sandbox (real execution)",qaVirtual:"Virtual (AI analysis)",qaVDesc:"Claude analyzes and predicts the behavior of each function",qaVTrace:"Execution trace",qaVPredicted:"Predicted",qaVConfidence:"Confidence",qaVHigh:"High",qaVMed:"Medium",qaVLow:"Low",qaVSideEffects:"Side effects",qaVBehavior:"Behavior",qaVEquivalent:"Equivalent",qaVDifferent:"Different",qaVTab:"View",dashTitle:"Dashboard",dashWelcome:"Welcome",dashNewMig:"New Migration",dashTotalMig:"Migrations",dashAvgScore:"Avg Score",dashFilesProc:"Files",dashRecent:"Recent Activity",dashNoData:"No migrations yet",dashStart:"Start",sideNew:"New Migration",sideDash:"Dashboard",sideResults:"Results",sideHist:"History",sideQA:"QA Tests",sideCfg:"AI Config",loginWelcome:"Welcome to",loginName:"Your name",loginBtn:"Sign In",step1:"Files",step2:"Configure",step3:"Migrate",step4:"Results",
-    localFiles:"Local Files",localFilesDesc:"Upload .zip or code files from your computer",ghRepoL:"GitHub Repository",ghRepoDesc:"Import files directly from any repo",strengths2:"Strengths",migrateTo2:"Migrate to",scoreTrend:"Score Trend",noMigYet:"No migrations yet",noMigDesc:"Start your first migration to see stats and trends here",preview2:"Preview",copyCode:"Copy",riskScore2:"RISK SCORE",readiness2:"READINESS",qualityLayers:"Quality Layers"
-  },
-  pt: {
-    sub:"Code Intelligence Platform",upload:"Enviar",config:"Configurar",results:"Resultados",
-    history:"Histórico",testProj:"Projetos de Teste",testDesc:"Multi-arquivo — selecione um projeto",
-    drag:"Arraste arquivos ou clique",files:"arquivo(s)",clean:"Limpar",
-    detected:"Auto-detectado",lowConf:"Baixa confiança",auto:"Auto",
-    cfgMig:"Configurar Migração",cfg:"Configuração",aiCfg:"Configuração Avançada de IA",
-    aiDesc2:"Metodologia Sênior — Prompts nível Staff/Principal Engineer",migP:"Prompt de Migração (6 Fases + 10 Diretivas)",revP:"Prompt de Revisão QA (8 Dimensões + 12 Critérios)",
-    sysP:"PROMPT DO SISTEMA (Staff Engineer Methodology)",guide:"DIRETIVAS DE MIGRAÇÃO (10 fases sequenciais)",crit:"CRITÉRIOS DE VALIDAÇÃO (12 dimensões especializadas)",
-    vars:"Variáveis:",reset:"Redefinir",type:"Tipo de migração",
-    updVer:"Atualizar Versão",chgLang:"Mudar Linguagem",origin:"Origem",dest:"Destino",
-    selVer:"Selecionar versão...",selLang:"Selecionar linguagem...",
-    model:"Modelo",summary:"Resumo",migrate:"Migrar",done:"Concluído",
-    dlAll:"Baixar Tudo",newMig:"Nova Migração",risks:"Riscos",
-    filesLbl:"ARQUIVOS",changes:"alterações",orig:"Original",mig:"Migrado",
-    validate:"Análise Adicional",static:"Análise Profunda",aiRev:"Revisão QA Sênior",
-    staticD:"8 camadas: arquitetura, segurança, async, tipos, performance",aiD:"8 dimensões ponderadas: funcional, sintaxe, idiomática, async, segurança, erros, contratos, docs",
-    ok:"Aprovado",obs:"Com observações",rej:"Rejeitado",
-    errs:"Erros",warns:"Avisos",good:"Bem feito",score:"Pontuação",
-    reviewing:"Claude analisando em profundidade...",noHist:"Sem migrações ainda",
-    lines:"linhas",adv:"Avançado",inter:"Intermediário",
-    hi:"Alto",med:"Médio",lo:"Baixo",qual:"QUALIDADE",spd:"VELOCIDADE",view:"Ver",
-    fixBtn:"Gerar Solução Completa",fixBtnShort:"Gerar Solução",fixing:"Gerando solução com IA...",
-    fixPlan:"PLANO DE AÇÃO",fixCode:"CÓDIGO CORRIGIDO",fixCheck:"CHECKLIST DE VERIFICAÇÃO",
-    fixTitle:"Solução Gerada por IA",fixApply:"Aplicar Correção",fixDl:"Baixar Corrigido",
-    fixClose:"Fechar",fixEmpty:"Sem erros — plano de ação não necessário",
-    dimEval:"DIMENSÕES DE AVALIAÇÃO",
-    deepLayers:"CAMADAS DE ANÁLISE",deepCrit:"ACHADOS CRÍTICOS",deepImpr:"MELHORIAS SUGERIDAS",
-    deepStr:"PONTOS FORTES",deepAnalyzing:"Análise profunda em andamento...",
-    deepDesc:"Claude analisa arquitetura, segurança, async, tipos, performance e contrato API",
-    revDesc:"Claude avalia funcionalidade, sintaxe, idiomática, segurança e documentação",
-    stepReview:"1. Revisar",stepFix:"2. Corrigir",stepApply:"3. Aplicar",
-    noIssues:"Sem achados críticos",issuesFound:"achados detectados",
-    genSolution:"Quer que Claude gere a solução?",
-    pass:"Passa",warn:"Aviso",fail:"Falha",
-    ph1:"Migrando código",ph2:"Auto-revisão IA",ph3:"Corrigindo erros",ph4:"Verificação final",
-    phClean:"Sem erros",phFixed:"corrigidos",phIter:"iteração",phScore:"pontos",
-    pipeDesc:"Migração com revisão e correção automática integrada",
-    optDesc:"O código já foi revisado e corrigido. Estas ferramentas são para análise adicional opcional",
-    gPhA:"Analisando aplicação",gPhB:"Migrando arquivos",gPhB2:"Consolidando arquivos",gPhB2a:"Auditoria de dependências",gPhB2b:"Corrigindo conexões",gPhC:"Validação de integração",gPhD:"Correção de integração",
-    gPhAd:"Entendendo arquitetura, dependências e contratos",gPhBd:"Migração com contexto de arquitetura por arquivo",
-    gPhCd:"Verificando que tudo funcione junto",gPhDd:"Corrigindo problemas entre arquivos",
-    mgHdr:"Migração em andamento",mgElapsed:"Decorrido",mgRemain:"Restante",mgModel:"Modelo",
-    mgFiles:"Arquivos",mgApiCalls:"Chamadas API",mgThroughput:"Rendimento",mgQueue:"Fila de arquivos",
-    mgPending:"Pendente",mgActive:"Migrando",mgPlanning:"Planejando",mgCompleted:"Concluído",mgActivity:"Atividade",
-    mgFilesPerMin:"arq/min",mgLinesProcessed:"linhas processadas",mgPhase:"Fase atual",
-    mgWaiting:"Aguardando",mgNoFiles:"Sem arquivos ainda",cancel:"Cancelar",timeLimit:"Limite: 8 min",
-    mgTokens:"Tokens",mgCost:"Custo est.",crossLang:"Cross-Language",verUpg:"Atualização",mgModSys:"Sistema de módulos",mgLastChg:"Última alteração",
-    rcTitle:"Relatório de Migração",rcGrade:"Nota",rcIter:"Iterações",rcFixed:"Correções",rcTime:"Tempo total",rcArch:"Arquitetura",rcRisks:"Riscos detectados",rcVerified:"Verificados",rcPipeline:"Pipeline",
-    intTitle:"Relatório de Integração",intPass:"Integração validada",intFail:"Problemas de integração",
-    intVerified:"Verificações corretas",intIssues:"Problemas detectados",
-    cbTitle:"Análise do Codebase",cbArch:"Arquitetura",cbPurpose:"Propósito",cbDeps:"Dependências",cbRisks:"Riscos identificados",
-    intIter:"Iteração de integração",intFixing:"Corrigindo integração",intRecheck:"Re-verificando integração",intTarget:"Objetivo: 95/100",
-    audit:"Auditoria",auditTitle:"Registro de Auditoria",auditDesc:"Rastreabilidade completa de tempos por fase",
-    auditTotal:"Tempo Total",auditPhase:"Fase",auditDuration:"Duração",auditStart:"Início",auditEnd:"Fim",
-    auditStatus:"Status",auditDetail:"Detalhe",auditFile:"Arquivo",auditExport:"Exportar JSON",
-    auditConfig:"Configuração",auditTimeline:"Linha do Tempo",auditSummary:"Resumo de Tempos",
-    auditCalls:"Chamadas API",auditAvg:"Média",auditSlowest:"Mais lento",auditFastest:"Mais rápido",
-    auditDistrib:"Distribuição de Tempos",auditScoreEvol:"Evolução do Score",auditFileComp:"Tempo por Arquivo",
-    auditPipeline:"Pipeline de Execução",auditEfficiency:"Eficiência",auditOverhead:"Overhead IA",
-    auditPhDesc:"Descrição da Fase",auditIssuesDelta:"Delta de Issues",auditTokenEst:"Tokens Est.",
-    auditFixRate:"Taxa de Correção",auditPhases:"fases completas",auditIter:"iterações",
-    rollback:"Rollback — fix piorou resultado, restaurando versão anterior",
-    stall:"Estagnação — score não melhora, parando ciclo",
-    pdfExport:"Exportar PDF",pdfGen:"Gerando PDF...",pdfTitle:"Relatório de Migração",
-    pdfExecSum:"Resumo Executivo",pdfConfig:"Configuração",pdfIntReport:"Relatório de Integração",
-    pdfAuditTrail:"Auditoria de Tempos",pdfRisks:"Análise de Riscos",pdfFiles:"Arquivos Migrados",
-    pdfGenBy:"Gerado por",pdfDate:"Data",pdfScore:"Pontuação",pdfVerdict:"Veredito",
-    pdfIssues:"Problemas",pdfVerified:"Verificações",pdfPhase:"Fase",pdfDuration:"Duração",
-    pdfChanges:"Alterações Detectadas",pdfModel:"Modelo Utilizado",pdfTotalTime:"Tempo Total",
-    pdfApiCalls:"Chamadas API",pdfConfidential:"CONFIDENCIAL — SII Group Chile",
-    dropTitle:"Solte seu código fonte aqui",orBrowse:"ou procure arquivos",supportedLangs:"Linguagens suportadas",
-    readyCfg:"Configurar migração",samples:"Projetos de exemplo",samplesDesc:"Projetos demo para testes",
-    linesCode:"linhas de código",filesSel:"arquivos selecionados",detectedAs:"detectado como",
-    pMaps:"Mapas de Paradigma",pMapsDesc:"Traduções API concretas para migrações cross-language",
-    pStdlib:"Traduções Stdlib",pPatterns:"Padrões de Código",pModules:"Sistema de Módulos",pAsync:"Modelo Async",pTypes:"Sistema de Tipos",
-    pMapsNone:"Sem mapeamento disponível para este par de linguagens",pMapsActive:"Ativo para",pConns:"conexões",pIssues:"problemas",pBroken:"quebradas",
-    andTitle:"Análise Android",andArch:"Arquitetura",andDeprecated:"APIs Obsoletas",andCompose:"Migração Compose",andSecurity:"Segurança Android",andGradle:"Dependências Gradle",andRefactor:"Plano de Refatoração",andModular:"Modularização",andReport:"Relatório Pré-Migração",andDownload:"Baixar Relatório",andBreach:"Brechas Detectadas",andPlan:"Plano de Ação",andLibs:"Atualização de Bibliotecas",andPattern:"Padrão Detectado",andTarget:"Padrão Alvo",andImpact:"Impacto",andEffort:"Esforço",andPriority:"Prioridade",andCritical:"Crítico",andMajor:"Maior",andMinor:"Menor",andXmlViews:"XML Views",andComposeTarget:"Jetpack Compose",andMvp:"MVP/MVC Legado",andMvvm:"MVVM + Clean",andAsyncTask:"AsyncTask (obsoleto)",andCoroutines:"Coroutines",andKotlinVer:"Versão Kotlin",andAndroidApi:"API Android",andMinSdk:"Min SDK",andTargetSdk:"Target SDK",andJetpack:"Bibliotecas Jetpack",andBreachSummary:"Resumo de Brechas",andNoBreaches:"Sem brechas detectadas",andGenReport:"Gerar Relatório",andReportReady:"Relatório pronto",andViewReport:"Ver Relatório",andExportHtml:"Exportar HTML",
-    qaTitle:"QA Sandbox",qaRun:"Executar Testes",qaRunning:"Executando...",qaPreTitle:"Testes Pré-Migração",qaPostTitle:"Testes Pós-Migração",qaPassed:"Passaram",qaFailed:"Falharam",qaSkipped:"Omitidos",qaCompare:"Comparar Pré vs Pós",qaRetest:"Re-testar Migrado",qaNoTests:"Sem testes gerados ainda",qaGenerate:"Gerar Test Suite",qaTotal:"Total testes",qaIdentical:"Resultados idênticos",qaRegression:"Regressão detectada",qaNewPass:"Novo sucesso",qaExecTime:"Tempo execução",qaInput:"Entrada",qaExpected:"Esperado",qaActual:"Resultado",qaUnit:"Unitário",qaInteg:"Integração",qaApi:"API",qaFunc:"Função",qaFile:"Arquivo",qaCoverage:"Cobertura",qaExport:"Exportar Testes",qaSandbox:"Sandbox (execução real)",qaVirtual:"Virtual (análise IA)",qaVDesc:"Claude analisa e prevê o comportamento de cada função",qaVTrace:"Rastreamento de execução",qaVPredicted:"Previsto",qaVConfidence:"Confiança",qaVHigh:"Alta",qaVMed:"Média",qaVLow:"Baixa",qaVSideEffects:"Efeitos colaterais",qaVBehavior:"Comportamento",qaVEquivalent:"Equivalente",qaVDifferent:"Diferente",qaVTab:"Vista",dashTitle:"Dashboard",dashWelcome:"Bienvenido",dashNewMig:"Nueva Migración",dashTotalMig:"Migraciones",dashAvgScore:"Score Promedio",dashFilesProc:"Archivos",dashRecent:"Actividad Reciente",dashNoData:"Sin migraciones aún",dashStart:"Comenzar",sideNew:"Nueva Migración",sideDash:"Dashboard",sideResults:"Resultados",sideHist:"Historial",sideQA:"QA Tests",sideCfg:"Config. IA",loginWelcome:"Bienvenido a",loginName:"Tu nombre",loginBtn:"Ingresar",
-    localFiles:"Arquivos Locais",localFilesDesc:"Envie .zip ou arquivos de código",ghRepoL:"Repositório GitHub",ghRepoDesc:"Importe arquivos de qualquer repo",strengths2:"Pontos Fortes",migrateTo2:"Migrar para",scoreTrend:"Tendência de Scores",noMigYet:"Sem migrações ainda",noMigDesc:"Inicie sua primeira migração para ver estatísticas",preview2:"Pré-visualização",copyCode:"Copiar",riskScore2:"RISCO",readiness2:"PREPARAÇÃO",qualityLayers:"Camadas de Qualidade"
-  }
-};
+// i18n imported from ./i18n/translations.js
 
-var UILANGS = [
-  {code:"es",label:"Español",flag:"\ud83c\uddea\ud83c\uddf8"},
-  {code:"en",label:"English",flag:"\ud83c\uddec\ud83c\udde7"},
-  {code:"pt",label:"Português",flag:"\ud83c\udde7\ud83c\uddf7"}
-];
+// UILANGS, LANGS imported from ./config/languages.js
 
-var LANGS = {
-  python:{n:"Python",i:"\ud83d\udc0d",v:["2.7","3.6","3.8","3.10","3.12"],x:[".py"],c:"#3776AB"},
-  javascript:{n:"JavaScript",i:"\u26a1",v:["ES5","ES6/ES2015","ES2020","ES2024"],x:[".js",".mjs"],c:"#D4A017"},
-  typescript:{n:"TypeScript",i:"\ud83d\udd37",v:["3.x","4.x","5.0","5.6"],x:[".ts",".tsx"],c:"#3178C6"},
-  java:{n:"Java",i:"\u2615",v:["8","11","17","21"],x:[".java"],c:"#ED8B00"},
-  csharp:{n:"C#",i:"\ud83d\udfe3",v:[".NET Framework 4.8",".NET Core 3.1",".NET 6",".NET 8"],x:[".cs"],c:"#512BD4"},
-  go:{n:"Go",i:"\ud83d\udc39",v:["1.18","1.20","1.21","1.22"],x:[".go"],c:"#00ADD8"},
-  rust:{n:"Rust",i:"\ud83e\udd80",v:["2018","2021","2024"],x:[".rs"],c:"#CE422B"},
-  php:{n:"PHP",i:"\ud83d\udc18",v:["7.4","8.0","8.2","8.3"],x:[".php"],c:"#777BB4"},
-  ruby:{n:"Ruby",i:"\ud83d\udc8e",v:["2.7","3.0","3.2","3.3"],x:[".rb"],c:"#CC342D"},
-  kotlin:{n:"Kotlin",i:"\ud83d\udfe0",v:["1.5","1.6","1.7","1.8","1.9","2.0","2.1"],x:[".kt",".kts"],c:"#2563EB"}
-};
+// CROSS, TARGET_EXT, MODULE_CONVENTIONS imported from ./config/languages.js
 
-var CROSS = [
-  {f:"javascript",t:"typescript",l:"JS → TS"},
-  {f:"typescript",t:"javascript",l:"TS → JS"},
-  {f:"python",t:"javascript",l:"Py → JS"},
-  {f:"javascript",t:"python",l:"JS → Py"},
-  {f:"java",t:"csharp",l:"Java → C#"},
-  {f:"csharp",t:"java",l:"C# → Java"},
-  {f:"java",t:"python",l:"Java → Py"},
-  {f:"python",t:"java",l:"Py → Java"},
-  {f:"java",t:"kotlin",l:"Java → Kotlin"},
-  {f:"kotlin",t:"java",l:"Kotlin → Java"},
-  {f:"ruby",t:"python",l:"Ruby → Py"},
-  {f:"php",t:"python",l:"PHP → Py"},
-  {f:"go",t:"rust",l:"Go → Rust"}
-];
+// PARADIGM_MAPS, getParadigmMap imported from ./config/paradigmMaps.js
+// calcCapacity imported from ./services/claudeClient.js
 
-// ═══ Cross-language file mapping ═══
-var TARGET_EXT={python:".py",javascript:".js",typescript:".ts",java:".java",csharp:".cs",go:".go",rust:".rs",php:".php",ruby:".rb",kotlin:".kt"};
-var MODULE_CONVENTIONS=(function(){
-  // Built dynamically to prevent artifact parser from detecting example strings as real imports
-  var mc={};
-  mc.javascript={system:"CommonJS (require/module.exports) or ESM (import/export)",naming:"camelCase files, index.js for barrel exports",imports:"CommonJS: const x = require(path) / ESM: import x (from path)",example:"Use require() for CommonJS or import/export for ESM"};
-  mc.typescript={system:"ESM (import/export) with type annotations",naming:"camelCase files, index.ts for barrel exports",imports:"ESM: import { Type } (from path)",example:"Use import/export with type annotations"};
-  mc.python={system:"Python modules (import/from...import)",naming:"snake_case files, __init__.py for packages",imports:"Python: from module import Class / import module",example:"Use from...import for specific classes"};
-  mc.java={system:"Java packages (import com.pkg.Class)",naming:"PascalCase files matching class names",imports:"import com.package.ClassName;",example:"Use package imports matching directory structure"};
-  mc.csharp={system:".NET namespaces (using Namespace)",naming:"PascalCase files matching class names",imports:"using Namespace;",example:"Use using directives for namespace imports"};
-  mc.kotlin={system:"Kotlin packages (import pkg.Class) + Android components (Activity, Fragment, ViewModel)",naming:"PascalCase for classes, camelCase for functions/extensions",imports:"Kotlin: import com.package.ClassName / import android.x.y",example:"Use package imports, extension functions, Jetpack libraries"};
-  mc.go={system:"Go packages (import path)",naming:"snake_case files, package per directory",imports:"import github.com/user/pkg",example:"Use import with package paths"};
-  mc.rust={system:"Rust modules (mod/use)",naming:"snake_case files, mod.rs for modules",imports:"use crate::module::Type;",example:"Use mod declarations and use paths"};
-  mc.ruby={system:"Ruby require/require_relative",naming:"snake_case files",imports:"require_relative path_to_module",example:"Use require_relative for local files"};
-  mc.php={system:"PHP namespaces + use/require",naming:"PascalCase files matching class",imports:"use App\\Module\\Class;",example:"Use namespace and use declarations"};
-  return mc;
-})();
+// mapTargetFile extracted to ./services/migrationPhases.js
 
-// ═══ Cross-language paradigm mappings — 8 bidirectional maps with concrete API translations ═══
-var PARADIGM_MAPS = {
-  "python→javascript": {
-    title: "Python → JavaScript/Node.js",
-    stdlib: [
-      "print('x') / print(x,end='') → console.log('x') / process.stdout.write(x)",
-      "print(x, file=sys.stderr) → console.error(x)",
-      "urllib2.urlopen(url) → fetch(url) or axios.get(url)",
-      "urllib2.Request(url,data,headers) → fetch(url, {method:'POST',headers,body:JSON.stringify(data)})",
-      "requests.get(url) → await fetch(url).then(r=>r.json())",
-      "requests.post(url,json=data) → await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})",
-      "json.loads(s) → JSON.parse(s)",
-      "json.dumps(o) / json.dumps(o,indent=2) → JSON.stringify(o) / JSON.stringify(o,null,2)",
-      "ConfigParser → JSON config file, dotenv, or cosmiconfig",
-      "os.path.exists(p) → fs.existsSync(p)",
-      "os.path.join(a,b) → path.join(a,b)",
-      "os.path.basename(p) / os.path.dirname(p) → path.basename(p) / path.dirname(p)",
-      "os.path.splitext(f) → [path.basename(f,path.extname(f)),path.extname(f)]",
-      "os.makedirs(p,exist_ok=True) → fs.mkdirSync(p,{recursive:true})",
-      "os.listdir(p) → fs.readdirSync(p)",
-      "os.walk(p) → fs.readdirSync(p,{recursive:true,withFileTypes:true}) (Node 20+)",
-      "pathlib.Path(f).read_text() → fs.readFileSync(f,'utf8')",
-      "pathlib.Path(f).write_text(s) → fs.writeFileSync(f,s,'utf8')",
-      "pathlib.Path(f).exists() → fs.existsSync(f)",
-      "pathlib.Path(a) / b → path.join(a,b)",
-      "open(f,'r').read() → fs.readFileSync(f,'utf8') or await fs.promises.readFile(f,'utf8')",
-      "open(f,'w').write(s) → fs.writeFileSync(f,s) or await fs.promises.writeFile(f,s)",
-      "open(f,'rb') → fs.readFileSync(f) (returns Buffer)",
-      "time.strftime('%Y-%m-%d') → new Date().toISOString().slice(0,10)",
-      "time.time() → Date.now()/1000",
-      "time.sleep(n) → await new Promise(r=>setTimeout(r,n*1000))",
-      "datetime.now() → new Date()",
-      "datetime.now().isoformat() → new Date().toISOString()",
-      "datetime.strptime(s,fmt) → new Date(s) or dayjs(s,fmt)",
-      "timedelta(days=n) → n*24*60*60*1000 (ms) or dayjs().add(n,'day')",
-      "sys.argv → process.argv.slice(2)",
-      "sys.exit(code) → process.exit(code)",
-      "os.environ['KEY'] / os.environ.get('KEY',def) → process.env.KEY || def",
-      "re.match(pat,s) → s.match(new RegExp(pat))",
-      "re.search(pat,s) → new RegExp(pat).exec(s)",
-      "re.findall(pat,s) → [...s.matchAll(new RegExp(pat,'g'))].map(m=>m[0])",
-      "re.sub(pat,repl,s) → s.replace(new RegExp(pat,'g'),repl)",
-      "re.compile(pat) → new RegExp(pat,'g')",
-      "re.split(pat,s) → s.split(new RegExp(pat))",
-      "collections.Counter(items) → items.reduce((m,x)=>(m[x]=(m[x]||0)+1,m),{})",
-      "collections.defaultdict(list) → new Proxy({},{get:(t,k)=>(t[k]=t[k]||[],t[k])})",
-      "collections.OrderedDict → Map() (preserves insertion order)",
-      "collections.deque → array (use push/shift for FIFO, push/pop for LIFO)",
-      "collections.namedtuple('P',['x','y']) → class P { constructor(x,y){this.x=x;this.y=y} }",
-      "itertools.chain(*lists) → [...list1,...list2,...listN] or [].concat(...lists)",
-      "itertools.product(a,b) → a.flatMap(x=>b.map(y=>[x,y]))",
-      "itertools.combinations(arr,r) → custom generator or combinatorics lib",
-      "itertools.zip_longest(a,b,fill=0) → Array.from({length:Math.max(a.length,b.length)},(_,i)=>[a[i]??0,b[i]??0])",
-      "functools.reduce(fn,items,init) → items.reduce(fn,init)",
-      "functools.partial(fn,a) → fn.bind(null,a) or (b)=>fn(a,b)",
-      "functools.lru_cache → manual Map cache or memoize lib",
-      "hashlib.sha256(s.encode()).hexdigest() → crypto.createHash('sha256').update(s).digest('hex')",
-      "base64.b64encode(s.encode()).decode() → Buffer.from(s).toString('base64')",
-      "base64.b64decode(s) → Buffer.from(s,'base64').toString()",
-      "uuid.uuid4() → crypto.randomUUID()",
-      "copy.deepcopy(obj) → structuredClone(obj)",
-      "copy.copy(obj) → {...obj} (shallow spread)",
-      "math.floor/ceil/round → Math.floor/ceil/round",
-      "math.sqrt/pow/log → Math.sqrt/pow/log",
-      "random.random() → Math.random()",
-      "random.randint(a,b) → Math.floor(Math.random()*(b-a+1))+a",
-      "random.choice(arr) → arr[Math.floor(Math.random()*arr.length)]",
-      "random.shuffle(arr) → arr.sort(()=>Math.random()-0.5) or Fisher-Yates",
-      "logging.info/error/debug → console.log/error/debug or winston/pino logger",
-      "subprocess.run(cmd) → child_process.execSync(cmd) or execa(cmd)",
-      "typing.Optional[T] → T|undefined or T|null",
-      "Decimal(x) → decimal.js lib or native arithmetic",
-      "string.Template('$name') → template literal"
-    ],
-    patterns: [
-      "class Foo: def __init__(self) → class Foo { constructor() }",
-      "self.x → this.x (EVERY instance reference)",
-      "def method(self,a,b) → method(a,b) { ... } (drop self)",
-      "@staticmethod def fn() → static fn() { }",
-      "@classmethod def fn(cls) → static fn() { }",
-      "@property def name(self) → get name() { return this._name; }",
-      "@name.setter def name(self,v) → set name(v) { this._name=v; }",
-      "__str__(self) / __repr__(self) → toString() { }",
-      "__len__(self) → get length() { } or custom method",
-      "__eq__(self,other) → equals(other) { } (no operator overloading)",
-      "__getitem__(self,key) → Proxy with get trap or get(key) method",
-      "__contains__(self,item) → has(item) method",
-      "__iter__/__next__ → [Symbol.iterator]() { } generator",
-      "@dataclass class Foo: x:int; y:str → class Foo { constructor(x,y){this.x=x;this.y=y} }",
-      "for k,v in dict.iteritems() → for (const [k,v] of Object.entries(dict))",
-      "for k,v in dict.items() → for (const [k,v] of Object.entries(dict))",
-      "dict.has_key(k) / k in dict → k in obj / obj.hasOwnProperty(k)",
-      "isinstance(x, str) / isinstance(x, basestring) → typeof x === 'string'",
-      "isinstance(x, (int,float,long)) → typeof x === 'number'",
-      "isinstance(x,list) → Array.isArray(x)",
-      "isinstance(x,dict) → typeof x==='object'&&x!==null&&!Array.isArray(x)",
-      "isinstance(x,bool) → typeof x === 'boolean'",
-      "isinstance(x,tuple) → Array.isArray(x) (Object.freeze for immutability)",
-      "list.append(x) → array.push(x)",
-      "list.extend(other) → array.push(...other)",
-      "list.insert(i,x) → array.splice(i,0,x)",
-      "list.pop() / list.pop(i) → array.pop() / array.splice(i,1)[0]",
-      "list.remove(x) → array.splice(array.indexOf(x),1)",
-      "list.index(x) → array.indexOf(x) (-1 vs ValueError)",
-      "list.count(x) → array.filter(i=>i===x).length",
-      "list.reverse() → array.reverse() (mutates) or [...arr].reverse()",
-      "list(set(items)) → [...new Set(items)]",
-      "dict.get(k,default) → obj[k] ?? default",
-      "dict.setdefault(k,v) → obj[k] = obj[k] ?? v",
-      "dict.update(other) → Object.assign(obj,other) or {...obj,...other}",
-      "dict.pop(k,default) → (v=obj[k]??default, delete obj[k], v)",
-      "'x' in list → array.includes('x')",
-      "'x' in dict → 'x' in obj || obj.hasOwnProperty('x')",
-      "[x*2 for x in items] → items.map(x=>x*2)",
-      "[x for x in items if x>0] → items.filter(x=>x>0)",
-      "[f(x) for x in items if p(x)] → items.filter(p).map(f)",
-      "{k:v for k,v in items} → Object.fromEntries(items.map(([k,v])=>[k,v]))",
-      "{k:f(v) for k,v in d.items()} → Object.fromEntries(Object.entries(d).map(([k,v])=>[k,f(v)]))",
-      "set comprehension {x for x in items} → new Set(items.map(x=>x))",
-      "generator (x for x in items) → function*(){for(const x of items)yield x}()",
-      "def gen(): yield x → function* gen() { yield x }",
-      "yield from iterable → yield* iterable",
-      "next(gen) → gen.next().value",
-      "try/except Exception as e → try { } catch(e) { }",
-      "except (TypeError,ValueError) → catch(e) { if(e instanceof TypeError||e instanceof RangeError) }",
-      "with open(f) as fh: → const data=fs.readFileSync(f,'utf8') or try/finally",
-      "with contextmanager → try { acquire(); ... } finally { release(); }",
-      "raise ValueError('msg') → throw new Error('msg')",
-      "raise CustomError(msg) from e → throw new CustomError(msg,{cause:e})",
-      "None → null",
-      "True / False → true / false",
-      "lambda x: x+1 → (x)=>x+1",
-      "def fn(a,b=10,*args,**kwargs) → function fn(a,b=10,...args) (kwargs as options obj)",
-      "f'Hello {name}' / '%s'%name → `Hello ${name}` (template literal)",
-      "f'{val:.2f}' → val.toFixed(2)",
-      "f'{val:>10}' → val.toString().padStart(10)",
-      "a,b = b,a → [a,b]=[b,a]",
-      "a,b,c = tuple_val → const [a,b,c] = array_val",
-      "x if cond else y → cond ? x : y",
-      "sorted(list,key=lambda x:x.v) → [...list].sort((a,b)=>a.v-b.v)",
-      "sorted(list,reverse=True) → [...list].sort((a,b)=>b-a)",
-      "dict.keys()/values()/items() → Object.keys/values/entries(obj)",
-      "enumerate(items) → items.map((item,i)=>[i,item]) or forEach((item,i)=>{})",
-      "zip(a,b) → a.map((x,i)=>[x,b[i]])",
-      "any(cond for x in items) → items.some(x=>cond)",
-      "all(cond for x in items) → items.every(x=>cond)",
-      "sum(items) → items.reduce((s,x)=>s+x,0)",
-      "min(items)/max(items) → Math.min(...items)/Math.max(...items)",
-      "abs(x) → Math.abs(x)",
-      "round(x,n) → Number(x.toFixed(n))",
-      "divmod(a,b) → [Math.floor(a/b),a%b]",
-      "int(s,base) → parseInt(s,base)",
-      "str.startswith/endswith → str.startsWith/endsWith",
-      "str.strip()/lstrip()/rstrip() → str.trim()/trimStart()/trimEnd()",
-      "str.split(sep,maxsplit) → str.split(sep) (different maxsplit semantics!)",
-      "'sep'.join(list) → array.join('sep')",
-      "str.replace(old,new) → str.replaceAll(old,new) (ES2021+)",
-      "str.upper()/lower() → str.toUpperCase()/toLowerCase()",
-      "str.isdigit()/isalpha() → /^\\d+$/.test(str) / /^[a-zA-Z]+$/.test(str)",
-      "str.zfill(n) → str.padStart(n,'0')",
-      "chr(n)/ord(c) → String.fromCharCode(n)/c.charCodeAt(0)",
-      "map(fn,items) → items.map(fn)",
-      "filter(fn,items) → items.filter(fn)",
-      "len(x) → x.length",
-      "range(n) → Array.from({length:n},(_,i)=>i)",
-      "range(a,b) → Array.from({length:b-a},(_,i)=>i+a)",
-      "type(x).__name__ → typeof x or x.constructor.name",
-      "ABC/@abstractmethod → throw new Error('Abstract') in base",
-      "super().__init__() → super()",
-      "multiple inheritance class C(A,B) → mixin pattern or single extends",
-      "enum.Enum → Object.freeze({A:'A',B:'B'}) or TS enum"
-    ],
-    modules: [
-      "from module import Class → import { Class } from {./module.js}",
-      "from module import * → import * as module from {./module.js}",
-      "import module → import module from {./module.js} (default)",
-      "__name__=='__main__' → top-level await in ESM or if(require.main===module)",
-      "__init__.py barrel → index.js with re-exports: export { X } from {./x.js}",
-      "from .sibling import X → import { X } from {./sibling.js}",
-      "from package.sub import X → import { X } from {./sub/index.js}",
-      "requirements.txt / pyproject.toml → package.json dependencies",
-      "pip install pkg → npm install pkg"
-    ],
-    async: [
-      "urllib2.urlopen (sync) → await fetch() (async)",
-      "open().read() (sync I/O) → await fs.promises.readFile() (async)",
-      "time.sleep(n) (blocking) → await new Promise(r=>setTimeout(r,n*1000))",
-      "threading.Thread(target=fn) → Promise or Worker thread",
-      "multiprocessing.Pool → Promise.all() or worker_threads pool",
-      "asyncio.run(main()) → top-level await or main().catch(console.error)",
-      "async def fn(): await x → async function fn() { await x }",
-      "asyncio.gather(*coros) → await Promise.all([p1,p2])",
-      "asyncio.create_task(coro) → const p = asyncFn() (auto-starts)",
-      "asyncio.Queue → custom async queue or p-queue lib",
-      "async for item in aiter → for await (const item of asyncIter)"
-    ],
-    versionNotes: [
-      "Target ES5: No arrow functions (use function(){}), no template literals (use +), no const/let (use var), no class (use prototype), no destructuring",
-      "Target ES6/ES2015: Use const/let, arrow functions, template literals, classes, destructuring, default params, for...of, Map/Set, Promise",
-      "Target ES2020: Use optional chaining (?.), nullish coalescing (??), BigInt, Promise.allSettled, globalThis, dynamic import()",
-      "Target ES2024: Use Array.groupBy, Promise.withResolvers, Set operations, RegExp v flag, well-formed Unicode strings"
-    ]
-  },
+// MODELS imported from ./config/models.js
 
-  "javascript→python": {
-    title: "JavaScript/Node.js → Python",
-    stdlib: [
-      "console.log(x) → print(x)",
-      "console.error(x) → print(x, file=sys.stderr) or logging.error(x)",
-      "console.warn(x) → logging.warning(x)",
-      "console.table(data) → print(tabulate(data)) or pprint(data)",
-      "fetch(url) → requests.get(url) (sync) or aiohttp (async) or urllib.request.urlopen(url)",
-      "fetch(url,{method:'POST',body}) → requests.post(url,json=body)",
-      "fetch(url,{headers}) → requests.get(url,headers=headers)",
-      "response.json() → response.json() (requests) or json.loads(response.read())",
-      "response.text() → response.text (requests) or response.read().decode()",
-      "response.ok → response.ok (requests) or response.status == 200",
-      "JSON.parse(s) → json.loads(s)",
-      "JSON.stringify(obj) → json.dumps(obj)",
-      "JSON.stringify(obj,null,2) → json.dumps(obj,indent=2)",
-      "fs.readFileSync(f,'utf8') → Path(f).read_text() (pathlib) or open(f).read()",
-      "fs.writeFileSync(f,s) → Path(f).write_text(s) or open(f,'w').write(s)",
-      "fs.existsSync(p) → Path(p).exists() or os.path.exists(p)",
-      "fs.mkdirSync(p,{recursive:true}) → Path(p).mkdir(parents=True,exist_ok=True)",
-      "fs.readdirSync(p) → os.listdir(p) or list(Path(p).iterdir())",
-      "fs.unlinkSync(f) → os.remove(f) or Path(f).unlink()",
-      "fs.statSync(f).size → os.path.getsize(f) or Path(f).stat().st_size",
-      "fs.promises.readFile(f) → async: await aiofiles.open(f) or sync: Path(f).read_text()",
-      "path.join(a,b) → os.path.join(a,b) or Path(a)/b",
-      "path.resolve(p) → os.path.abspath(p) or Path(p).resolve()",
-      "path.basename(p) → os.path.basename(p) or Path(p).name",
-      "path.dirname(p) → os.path.dirname(p) or Path(p).parent",
-      "path.extname(p) → os.path.splitext(p)[1] or Path(p).suffix",
-      "new Date() → datetime.now()",
-      "new Date().toISOString() → datetime.now(timezone.utc).isoformat()",
-      "Date.now() → int(time.time()*1000)",
-      "new Date(s) → datetime.fromisoformat(s) (3.7+) or dateutil.parser.parse(s)",
-      "setTimeout(fn,ms) → asyncio.sleep(ms/1000) or time.sleep(ms/1000)",
-      "setInterval(fn,ms) → while loop with asyncio.sleep or threading.Timer",
-      "clearTimeout/clearInterval → task.cancel() (asyncio) or timer.cancel()",
-      "process.env.KEY → os.environ.get('KEY') or os.environ['KEY']",
-      "process.argv.slice(2) → sys.argv[1:]",
-      "process.cwd() → os.getcwd() or Path.cwd()",
-      "process.exit(code) → sys.exit(code)",
-      "Math.floor/ceil/round(x) → math.floor/ceil/round(x) or int(x)//1",
-      "Math.random() → random.random()",
-      "Math.max(...arr) / Math.min(...arr) → max(arr) / min(arr)",
-      "Math.abs/sqrt/pow/log → abs/math.sqrt/math.pow/math.log (abs is builtin)",
-      "x.length → len(x)",
-      "String(x) → str(x)",
-      "Number(x) → int(x) or float(x)",
-      "parseInt(x,10) → int(x)",
-      "parseFloat(x) → float(x)",
-      "isNaN(x) → math.isnan(x)",
-      "isFinite(x) → math.isfinite(x)",
-      "crypto.createHash('sha256').update(s).digest('hex') → hashlib.sha256(s.encode()).hexdigest()",
-      "crypto.randomUUID() → str(uuid.uuid4())",
-      "Buffer.from(s,'base64') → base64.b64decode(s)",
-      "Buffer.from(s).toString('base64') → base64.b64encode(s.encode()).decode()",
-      "structuredClone(obj) → copy.deepcopy(obj)",
-      "{...obj} (spread) → copy.copy(obj) or {**obj}",
-      "new RegExp(pat,'g') → re.compile(pat)",
-      "str.match(re) → re.match(pat,s) or re.search(pat,s)",
-      "str.matchAll(re) → re.finditer(pat,s)",
-      "str.replace(re,repl) → re.sub(pat,repl,s)",
-      "str.split(re) → re.split(pat,s)",
-      "new Map() → dict() (or OrderedDict for guaranteed order in 3.6)",
-      "new Set() → set()",
-      "new WeakMap() / new WeakRef(obj) → weakref.WeakValueDictionary() / weakref.ref(obj)",
-      "child_process.execSync(cmd) → subprocess.run(cmd,shell=True,capture_output=True)",
-      "EventEmitter → custom pub/sub or signals library"
-    ],
-    patterns: [
-      "class Foo { constructor(a,b) { this.a=a } } → class Foo: def __init__(self,a,b): self.a=a",
-      "this.x → self.x (EVERY instance reference)",
-      "method(a,b) { } → def method(self,a,b): (add self as first param)",
-      "static fn() { } → @staticmethod def fn():",
-      "get name() { } → @property def name(self):",
-      "set name(v) { } → @name.setter def name(self,v):",
-      "toString() { } → def __str__(self):",
-      "equals(other) → def __eq__(self,other):",
-      "[Symbol.iterator]() → def __iter__(self): / def __next__(self):",
-      "class Foo extends Bar → class Foo(Bar):",
-      "#privateField → self._private_field (convention)",
-      "class { static #count } → class Foo: _count = 0 (class variable)",
-      "for (const [k,v] of Object.entries(obj)) → for k,v in obj.items():",
-      "for (const item of array) → for item in array:",
-      "for (let i=0;i<arr.length;i++) → for i in range(len(arr)):",
-      "arr.forEach((item,i)=>{}) → for i,item in enumerate(arr):",
-      "while (cond) { } → while cond:",
-      "do { } while(cond) → while True: ... if not cond: break",
-      "typeof x==='string' → isinstance(x,str)",
-      "typeof x==='number' → isinstance(x,(int,float))",
-      "typeof x==='boolean' → isinstance(x,bool)",
-      "typeof x==='undefined' → x is None (or check with hasattr)",
-      "Array.isArray(x) → isinstance(x,list)",
-      "x instanceof Foo → isinstance(x,Foo)",
-      "arr.push(x) → arr.append(x)",
-      "arr.push(...other) → arr.extend(other)",
-      "arr.pop() → arr.pop()",
-      "arr.shift() → arr.pop(0) or collections.deque.popleft()",
-      "arr.unshift(x) → arr.insert(0,x)",
-      "arr.splice(i,1) → arr.pop(i) or del arr[i]",
-      "arr.splice(i,0,x) → arr.insert(i,x)",
-      "arr.slice(a,b) → arr[a:b]",
-      "arr.concat(other) → arr + other or [*arr,*other]",
-      "arr.includes(x) → x in arr",
-      "arr.indexOf(x) → arr.index(x) (wrap in try for -1 behavior)",
-      "arr.find(x=>cond) → next((x for x in arr if cond),None)",
-      "arr.findIndex(x=>cond) → next((i for i,x in enumerate(arr) if cond),-1)",
-      "arr.flat(depth) → [item for sub in arr for item in (sub if isinstance(sub,list) else [sub])]",
-      "arr.flatMap(fn) → [y for x in arr for y in fn(x)]",
-      "obj[k] ?? default → obj.get(k,default)",
-      "Object.assign(obj,other) → obj.update(other) or {**obj,**other}",
-      "Object.keys(obj) → list(obj.keys())",
-      "Object.values(obj) → list(obj.values())",
-      "Object.entries(obj) → obj.items()",
-      "Object.fromEntries(arr) → dict(arr)",
-      "Object.freeze(obj) → types.MappingProxyType(obj) or @dataclass(frozen=True)",
-      "{...obj,key:val} → {**obj,'key':val}",
-      "[...arr1,...arr2] → [*arr1,*arr2]",
-      "arr.map(x=>x*2) → [x*2 for x in arr]",
-      "arr.filter(x=>x>0) → [x for x in arr if x>0]",
-      "arr.some(x=>cond) → any(cond for x in arr)",
-      "arr.every(x=>cond) → all(cond for x in arr)",
-      "arr.reduce((s,x)=>s+x,0) → sum(arr) or functools.reduce()",
-      "[...arr].sort((a,b)=>a.v-b.v) → sorted(arr,key=lambda x:x.v)",
-      "[...new Set(arr)] → list(set(arr))",
-      "arr.join(sep) → sep.join(arr)",
-      "str.startsWith(p) / str.endsWith(s) → str.startswith(p) / str.endswith(s)",
-      "str.trim()/trimStart()/trimEnd() → str.strip()/lstrip()/rstrip()",
-      "str.padStart(n,c) / str.padEnd(n,c) → str.rjust(n,c) / str.ljust(n,c)",
-      "str.repeat(n) → str * n",
-      "str.toUpperCase()/toLowerCase() → str.upper()/str.lower()",
-      "str.replaceAll(old,new) → str.replace(old,new) (Python replace is global)",
-      "str.charAt(i) / str[i] → str[i]",
-      "str.charCodeAt(i) → ord(str[i])",
-      "String.fromCharCode(n) → chr(n)",
-      "try { } catch(e) { } → try: ... except Exception as e: ...",
-      "catch(e) { if(e instanceof TypeError) } → except TypeError as e:",
-      "throw new Error('msg') → raise ValueError('msg') or raise RuntimeError('msg')",
-      "throw new CustomError(msg,{cause:e}) → raise CustomError(msg) from e",
-      "null / undefined → None",
-      "true / false → True / False",
-      "(x)=>x+1 → lambda x: x+1",
-      "function fn(a,b=10,...args) → def fn(a,b=10,*args):",
-      "fn({opt1,opt2}) (options obj) → def fn(**kwargs): or def fn(opt1=None,opt2=None):",
-      "`Hello ${name}` → f'Hello {name}'",
-      "cond ? x : y → x if cond else y",
-      "x?.y?.z → getattr(getattr(x,'y',None),'z',None) or try/except",
-      "x ?? default → x if x is not None else default",
-      "const {a,b}=obj → a,b = obj['a'],obj['b']",
-      "const [a,b]=arr → a,b = arr",
-      "const [first,...rest]=arr → first,*rest = arr",
-      "switch(x) { case 'a': ... } → match x: case 'a': ... (3.10+) or if/elif",
-      "function* gen() { yield x } → def gen(): yield x",
-      "yield* iterable → yield from iterable",
-      "for await (const x of iter) → async for x in iter:",
-      "new Proxy(target,handler) → __getattr__/__setattr__/__getitem__ dunder methods",
-      "Symbol('desc') → string constant (no direct equivalent)",
-      "Promise.resolve(val) → asyncio.coroutine returning val or immediate return",
-      "async () => { } (IIFE) → asyncio.run(async_main())"
-    ],
-    modules: [
-      "import { X } from {./module.js} → from module import X",
-      "import * as mod from {./module.js} → import module",
-      "import mod from {./module.js} (default) → from module import default_export",
-      "export default X → X at module level (use __all__ to restrict)",
-      "export { X,Y } → __all__ = ['X','Y']",
-      "export class Foo {} → class Foo: (public by default)",
-      "index.js barrel → __init__.py with from .submodule import X",
-      "package.json dependencies → requirements.txt or pyproject.toml",
-      "npm install pkg → pip install pkg",
-      "dynamic import({mod}) → importlib.import_module({mod})"
-    ],
-    async: [
-      "async function fn() → async def fn(): (requires asyncio)",
-      "await fetch(url) → async: await aiohttp.ClientSession().get(url) or sync: requests.get(url)",
-      "await fs.promises.readFile(f) → async: await aiofiles.open(f) or sync: Path(f).read_text()",
-      "Promise.all([p1,p2]) → await asyncio.gather(p1,p2)",
-      "Promise.race([p1,p2]) → await asyncio.wait(tasks,return_when=FIRST_COMPLETED)",
-      "Promise.allSettled(promises) → results=await asyncio.gather(*tasks,return_exceptions=True)",
-      "new Promise((resolve,reject)=>{}) → loop.create_future() or asyncio.Future()",
-      "setTimeout(fn,ms) → await asyncio.sleep(ms/1000)",
-      "Worker threads → multiprocessing.Process or concurrent.futures.ProcessPoolExecutor",
-      "AbortController/signal → asyncio.Task.cancel() or threading.Event",
-      "event.on('data',cb) → asyncio.Queue or callback pattern",
-      "setImmediate(fn) → await asyncio.sleep(0) (yield control)"
-    ],
-    versionNotes: [
-      "Target Python 2.7: print stmt not fn, basestring not str, .iteritems() not .items(), urllib2, ConfigParser, no f-strings, no type hints",
-      "Target Python 3.6: f-strings, type hints, async/await, pathlib, no walrus operator",
-      "Target Python 3.8: Walrus operator (:=), positional-only params (/), f-string debugging (f'{x=}')",
-      "Target Python 3.10: match/case (structural pattern matching), union types X|Y, ParamSpec",
-      "Target Python 3.12: Type parameter syntax (def fn[T](x:T)), f-string any expression, improved error messages"
-    ]
-  },
-
-  "java→csharp": {
-    title: "Java → C#/.NET",
-    stdlib: [
-      "System.out.println(x) → Console.WriteLine(x)",
-      "String.format(\"%s: %d\",a,b) → $\"{a}: {b}\" (interpolation)",
-      "new SimpleDateFormat(\"yyyy-MM-dd\") → DateTime.Now.ToString(\"yyyy-MM-dd\")",
-      "System.currentTimeMillis() → DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()",
-      "new Date() → DateTime.Now or DateTime.UtcNow",
-      "Thread.sleep(ms) → await Task.Delay(ms) (async) or Thread.Sleep(ms)",
-      "Integer.parseInt(s) → int.Parse(s) or int.TryParse(s,out var n)",
-      "Double.parseDouble(s) → double.Parse(s)",
-      "System.getenv(\"KEY\") → Environment.GetEnvironmentVariable(\"KEY\")",
-      "Files.readString(Path.of(f)) → File.ReadAllText(f)",
-      "Files.writeString(Path.of(f),s) → File.WriteAllText(f,s)",
-      "Files.exists(Path.of(f)) → File.Exists(f)",
-      "Paths.get(a,b) → Path.Combine(a,b)",
-      "UUID.randomUUID() → Guid.NewGuid()",
-      "Math.max/min/abs → Math.Max/Min/Abs (PascalCase)",
-      "new ObjectMapper().readValue(s,T.class) → JsonSerializer.Deserialize<T>(s)",
-      "new ObjectMapper().writeValueAsString(obj) → JsonSerializer.Serialize(obj)",
-      "list.stream().filter(p).collect(toList()) → list.Where(p).ToList() (LINQ)",
-      "new BufferedReader(new FileReader(f)) → File.ReadLines(f) or StreamReader",
-      "System.err.println(x) → Console.Error.WriteLine(x)",
-      "Arrays.asList(a,b,c) → new List<T>{a,b,c}",
-      "Collections.unmodifiableList(list) → list.AsReadOnly()",
-      "Pattern.compile(regex).matcher(s) → Regex.Match(s,pattern)"
-    ],
-    patterns: [
-      "implements Interface → : IInterface (C# prefix I convention)",
-      "extends Base → : Base (single colon for both)",
-      "final field → readonly field",
-      "final class → sealed class",
-      "private String name + getName()/setName() → public string Name { get; set; } (auto-property)",
-      "ArrayList<T> / List<T> → List<T> (System.Collections.Generic)",
-      "HashMap<K,V> → Dictionary<K,V>",
-      "HashSet<T> → HashSet<T>",
-      "TreeMap<K,V> → SortedDictionary<K,V>",
-      "Optional<T> → T? (nullable) or Nullable<T>",
-      "opt.isPresent() → x != null / x is not null",
-      "opt.orElse(def) → x ?? def (null coalescing)",
-      "stream.filter(x->cond) → list.Where(x=>cond) (LINQ)",
-      "stream.map(x->fn(x)) → list.Select(x=>fn(x)) (LINQ)",
-      "stream.collect(Collectors.toList()) → .ToList()",
-      "stream.forEach(x->{}) → foreach(var x in list) or list.ForEach()",
-      "stream.reduce(id,acc) → list.Aggregate(id,(a,x)=>...)",
-      "stream.anyMatch(pred) → list.Any(pred) (LINQ)",
-      "stream.allMatch(pred) → list.All(pred) (LINQ)",
-      "stream.sorted(Comparator) → list.OrderBy(x=>x.Prop) (LINQ)",
-      "Collections.sort(list,comp) → list.Sort(comp) or list.OrderBy()",
-      "new Comparator<T>(){compare(a,b){}} → (a,b)=>a.CompareTo(b)",
-      "for (var entry : map.entrySet()) → foreach (var (key,val) in dict)",
-      "@Override → override keyword",
-      "@Deprecated → [Obsolete(\"message\")]",
-      "instanceof → is pattern: if (x is Type t) { use t }",
-      "try-with-resources → using statement: using var x = new R()",
-      "throw new IllegalArgumentException → throw new ArgumentException",
-      "catch(IOException|SQLException e) → catch(Exception e) when (e is IOException or SqlException)"
-    ],
-    modules: [
-      "package com.app.service → namespace App.Service",
-      "import java.util.List → using System.Collections.Generic",
-      "import static → using static ClassName",
-      "Maven/Gradle dependency → NuGet package reference"
-    ],
-    async: [
-      "CompletableFuture<T> → Task<T>",
-      "future.thenApply(fn) → await task; fn(result) or task.ContinueWith()",
-      "CompletableFuture.allOf(futures) → Task.WhenAll(tasks)",
-      "CompletableFuture.supplyAsync(()->val) → Task.Run(()=>val)",
-      "ExecutorService → Task.Run or ThreadPool",
-      "synchronized block → lock(obj) { } or SemaphoreSlim"
-    ],
-    versionNotes: [
-      "Target .NET 6: Minimal API, top-level statements, file-scoped namespaces, global usings, record structs",
-      "Target .NET 8: Primary constructors, collection expressions, default interface methods, required members, raw string literals",
-      "Target .NET Framework 4.8: Full System.Web, ConfigurationManager, WCF, classic ASP.NET MVC",
-      "Target .NET Core 3.1: No System.Web (use ASP.NET Core), IConfiguration instead of ConfigurationManager, dependency injection built-in"
-    ]
-  },
-
-  "csharp→java": {
-    title: "C#/.NET → Java",
-    stdlib: [
-      "Console.WriteLine(x) → System.out.println(x)",
-      "$\"{a}: {b}\" (interpolation) → String.format(\"%s: %s\",a,b)",
-      "DateTime.Now.ToString(fmt) → LocalDateTime.now().format(DateTimeFormatter.ofPattern(fmt))",
-      "DateTimeOffset.UtcNow → Instant.now() (java.time)",
-      "Thread.Sleep(ms) → Thread.sleep(ms)",
-      "int.Parse(s) → Integer.parseInt(s)",
-      "int.TryParse(s,out var n) → try{Integer.parseInt(s)}catch(NumberFormatException e){}",
-      "File.ReadAllText(f) → Files.readString(Path.of(f)) (Java 11+)",
-      "File.WriteAllText(f,s) → Files.writeString(Path.of(f),s)",
-      "File.Exists(f) → Files.exists(Path.of(f))",
-      "Path.Combine(a,b) → Paths.get(a,b).toString()",
-      "Guid.NewGuid() → UUID.randomUUID()",
-      "Environment.GetEnvironmentVariable(k) → System.getenv(k)",
-      "JsonSerializer.Deserialize<T>(s) → new ObjectMapper().readValue(s,T.class)",
-      "JsonSerializer.Serialize(obj) → new ObjectMapper().writeValueAsString(obj)",
-      "list.Where(p).ToList() → list.stream().filter(p).collect(Collectors.toList())",
-      "File.ReadLines(f) → Files.readAllLines(Path.of(f))",
-      "Console.Error.WriteLine(x) → System.err.println(x)",
-      "new List<T>{a,b,c} → List.of(a,b,c) (Java 9+)",
-      "list.AsReadOnly() → Collections.unmodifiableList(list)",
-      "Regex.Match(s,pat) → Pattern.compile(pat).matcher(s)"
-    ],
-    patterns: [
-      ": IInterface → implements Interface (drop I prefix)",
-      ": Base → extends Base",
-      "sealed class → final class",
-      "readonly field → final field",
-      "public string Name {get;set;} → private String name + getName()/setName()",
-      "auto-property {get;} → final field + getter",
-      "List<T> (System.Collections) → ArrayList<T> or List<T> (java.util)",
-      "Dictionary<K,V> → HashMap<K,V> or Map<K,V>",
-      "SortedDictionary<K,V> → TreeMap<K,V>",
-      "T? (nullable) → Optional<T> (Java 8+)",
-      "x ?? default → Optional.ofNullable(x).orElse(default)",
-      "x?.Property → Optional.ofNullable(x).map(o->o.getProperty())",
-      "list.Where(x=>cond) → list.stream().filter(x->cond)",
-      "list.Select(x=>fn(x)) → list.stream().map(x->fn(x))",
-      "list.ToList() → .collect(Collectors.toList())",
-      "list.Any(pred) → list.stream().anyMatch(pred)",
-      "list.All(pred) → list.stream().allMatch(pred)",
-      "list.OrderBy(x=>x.P) → list.stream().sorted(Comparator.comparing(x->x.getP()))",
-      "list.Aggregate(init,(a,x)=>...) → list.stream().reduce(init,(a,x)->...)",
-      "foreach(var x in list) → for(var x : list) (Java 10+ var)",
-      "foreach(var (k,v) in dict) → for(var e:map.entrySet()){var k=e.getKey();var v=e.getValue();}",
-      "is Type t (pattern) → instanceof Type t (Java 16+) or instanceof + cast",
-      "using var x = new R() → try(var x = new R()) { } (try-with-resources)",
-      "throw new ArgumentException → throw new IllegalArgumentException",
-      "throw new ArgumentNullException → throw new NullPointerException",
-      "catch when (condition) → catch then if(condition)",
-      "record Foo(int X) → record Foo(int x) {} (Java 16+)",
-      "[Obsolete] → @Deprecated",
-      "delegate/event → listener interface + callback pattern",
-      "LINQ to Objects → Java Stream API"
-    ],
-    modules: [
-      "namespace App.Service → package com.app.service",
-      "using System.Collections.Generic → import java.util.*",
-      "using static → import static pkg.ClassName.*",
-      "NuGet package → Maven/Gradle dependency"
-    ],
-    async: [
-      "async Task<T> Method() → CompletableFuture<T> method()",
-      "await task → future.join() (blocking) or .thenApply() (chained)",
-      "Task.WhenAll(tasks) → CompletableFuture.allOf(futures)",
-      "Task.Run(()=>val) → CompletableFuture.supplyAsync(()->val)",
-      "lock(obj){} → synchronized(obj){} or ReentrantLock",
-      "CancellationToken → volatile boolean flag or Future.cancel()"
-    ],
-    versionNotes: [
-      "Target Java 8: Streams, lambdas, Optional, CompletableFuture, no var, no records, no switch expressions",
-      "Target Java 11: var keyword, HttpClient, String methods (isBlank, strip, repeat), Files.readString",
-      "Target Java 17: Records, sealed classes, pattern matching instanceof, text blocks, switch expressions",
-      "Target Java 21: Virtual threads, record patterns, sequenced collections, string templates (preview)"
-    ]
-  },
-
-  "java→python": {
-    title: "Java → Python",
-    stdlib: [
-      "System.out.println(x) → print(x)",
-      "String.format(\"%s: %d\",a,b) → f'{a}: {b}'",
-      "Integer.parseInt(s) → int(s)",
-      "Double.parseDouble(s) → float(s)",
-      "new SimpleDateFormat(fmt).format(date) → datetime.now().strftime(fmt)",
-      "LocalDateTime.now() → datetime.now()",
-      "System.currentTimeMillis() → int(time.time()*1000)",
-      "Thread.sleep(ms) → time.sleep(ms/1000)",
-      "System.getenv(\"KEY\") → os.environ.get('KEY')",
-      "Files.readString(Path.of(f)) → Path(f).read_text() (from pathlib)",
-      "Files.writeString(Path.of(f),s) → Path(f).write_text(s)",
-      "Files.exists(Path.of(f)) → Path(f).exists()",
-      "Paths.get(a,b) → Path(a)/b or os.path.join(a,b)",
-      "UUID.randomUUID() → uuid.uuid4()",
-      "Math.max/min/abs → max()/min()/abs() (builtins)",
-      "Collections.sort(list) → list.sort() or sorted(list)",
-      "json via Jackson/Gson → json.loads(s) / json.dumps(obj)",
-      "Jackson ObjectMapper → json module (json.loads/json.dumps)",
-      "Arrays.asList(a,b) → [a,b] (literal list)",
-      "Collections.unmodifiableList(l) → tuple(l) (immutable)",
-      "list.stream().filter(p).map(f).collect(toList()) → [f(x) for x in list if p(x)]",
-      "new HashMap<>() → dict()",
-      "new ArrayList<>() → list()",
-      "new HashSet<>() → set()",
-      "StringBuilder → list.append()+str.join() or io.StringIO",
-      "Pattern.compile(re).matcher(s).find() → re.search(re,s)"
-    ],
-    patterns: [
-      "public class Foo { private int x; Foo(int x){this.x=x;} } → class Foo: def __init__(self,x): self.x=x",
-      "public class w/ getters/setters → @dataclass class Foo: x:int (3.7+)",
-      "record Foo(int x,String y) → @dataclass(frozen=True) class Foo: x:int; y:str",
-      "this.x → self.x",
-      "getX()/setX(v) → @property x / @x.setter or direct self.x",
-      "private/protected/public → _ prefix convention (no enforcement)",
-      "final → UPPER_CASE convention for constants",
-      "static method → @staticmethod or @classmethod",
-      "interface IFoo { } → class Foo(ABC): @abstractmethod",
-      "implements Interface → class Foo(Interface): (multiple inheritance)",
-      "extends Base → class Foo(Base):",
-      "ArrayList<T>/List<T> → list (optionally list[T] hints)",
-      "HashMap<K,V>/Map<K,V> → dict (optionally dict[K,V])",
-      "HashSet<T> → set",
-      "Optional<T> → None check or typing.Optional[T]",
-      "opt.orElse(def) → x if x is not None else def",
-      "stream.filter(p).map(f).collect(toList()) → [f(x) for x in items if p(x)]",
-      "stream.forEach(x->{}) → for x in items: ...",
-      "stream.anyMatch(pred) → any(pred(x) for x in items)",
-      "stream.allMatch(pred) → all(pred(x) for x in items)",
-      "for(var entry:map.entrySet()) → for k,v in d.items():",
-      "for(int i=0;i<n;i++) → for i in range(n):",
-      "instanceof Type → isinstance(x,Type)",
-      "switch/case → match/case (3.10+) or if/elif",
-      "try-with-resources → with statement",
-      "try/catch/finally → try/except/finally",
-      "throw new Exception(msg) → raise Exception(msg)",
-      "null → None",
-      "lambda x -> x+1 → lambda x: x+1",
-      "enum Direction{N,S} → class Direction(Enum): N='N'; S='S'"
-    ],
-    modules: [
-      "package com.app.service → directory structure app/service/",
-      "import java.util.List → no import needed (list is builtin)",
-      "import com.app.model.User → from app.model import User",
-      "Maven/Gradle → pip requirements.txt or pyproject.toml"
-    ],
-    async: [
-      "CompletableFuture<T> → async def fn() -> T: (asyncio)",
-      "future.thenApply(fn) → result = await coro; fn(result)",
-      "CompletableFuture.allOf(futures) → await asyncio.gather(*coros)",
-      "ExecutorService → concurrent.futures.ThreadPoolExecutor",
-      "synchronized → threading.Lock() or asyncio.Lock()"
-    ],
-    versionNotes: [
-      "Target Python 3.6: f-strings, type hints (PEP 484), async/await, pathlib, dataclasses (3.7)",
-      "Target Python 3.8: Walrus operator (:=), positional-only params, TypedDict, f'{x=}' debug",
-      "Target Python 3.10: match/case, union X|Y syntax, ParamSpec, structural pattern matching",
-      "Target Python 3.12: Type parameter syntax class Foo[T]:, f-string improvements, @override decorator"
-    ]
-  },
-
-  "python→java": {
-    title: "Python → Java",
-    stdlib: [
-      "print(x) → System.out.println(x)",
-      "f'{a}: {b}' → String.format(\"%s: %s\",a,b)",
-      "int(s) → Integer.parseInt(s)",
-      "float(s) → Double.parseDouble(s)",
-      "str(x) → String.valueOf(x)",
-      "len(x) → x.size() (collections) or x.length() (strings) or x.length (arrays)",
-      "datetime.now().strftime(fmt) → LocalDateTime.now().format(DateTimeFormatter.ofPattern(fmt))",
-      "time.sleep(n) → Thread.sleep((long)(n*1000))",
-      "os.environ.get('KEY') → System.getenv(\"KEY\")",
-      "Path(f).read_text() → Files.readString(Path.of(f)) (Java 11+)",
-      "Path(f).write_text(s) → Files.writeString(Path.of(f),s)",
-      "Path(f).exists() → Files.exists(Path.of(f))",
-      "os.path.join(a,b) → Paths.get(a,b).toString()",
-      "uuid.uuid4() → UUID.randomUUID()",
-      "max()/min()/abs() → Math.max()/Math.min()/Math.abs()",
-      "sorted(list) → list.stream().sorted().collect(Collectors.toList())",
-      "json.loads(s) → new ObjectMapper().readValue(s,Map.class) (Jackson)",
-      "json.dumps(obj) → new ObjectMapper().writeValueAsString(obj)",
-      "json module → Jackson ObjectMapper or Gson",
-      "[a,b] (list literal) → List.of(a,b) (Java 9+) or Arrays.asList(a,b)",
-      "tuple(l) (immutable) → Collections.unmodifiableList(l) or List.copyOf(l)",
-      "[f(x) for x in items if p(x)] → items.stream().filter(p).map(f).collect(toList())",
-      "dict() → new HashMap<>()",
-      "list() → new ArrayList<>()",
-      "set() → new HashSet<>()",
-      "str.join(parts) → String.join(sep,parts) or StringBuilder",
-      "re.search(pat,s) → Pattern.compile(pat).matcher(s).find()"
-    ],
-    patterns: [
-      "class Foo: def __init__(self,x): self.x=x → public class Foo { private int x; public Foo(int x){this.x=x;} }",
-      "@dataclass class Foo: x:int; y:str → public record Foo(int x,String y){} (Java 16+)",
-      "self.x → this.x",
-      "def method(self,a,b): → public ReturnType method(Type a,Type b) { } (add types)",
-      "@staticmethod def fn(): → public static ReturnType fn() { }",
-      "@property def name(self): → public String getName() { return this.name; }",
-      "list → ArrayList<T> (must declare element type)",
-      "dict → HashMap<K,V> (must declare key+value types)",
-      "set → HashSet<T>",
-      "tuple → custom record or List",
-      "None → null or Optional<T> for returns",
-      "[fn(x) for x in items if p(x)] → items.stream().filter(p).map(fn).collect(toList())",
-      "for k,v in d.items(): → for(var e:map.entrySet()){var k=e.getKey();var v=e.getValue();}",
-      "for i in range(n): → for(int i=0;i<n;i++)",
-      "any(pred(x) for x in items) → items.stream().anyMatch(pred)",
-      "isinstance(x,Type) → x instanceof Type",
-      "match/case (3.10+) → switch expression (Java 14+)",
-      "with open(f) as fh: → try(var r=new BufferedReader(new FileReader(f))){...}",
-      "raise Exception(msg) → throw new RuntimeException(msg)",
-      "lambda x: x+1 → (x)->x+1",
-      "**kwargs → Map<String,Object> param or Builder pattern",
-      "f'Hello {name}' → String.format(\"Hello %s\",name)",
-      "x if cond else y → cond ? x : y",
-      "class Direction(Enum): → enum Direction { N,S }",
-      "ABC / @abstractmethod → interface or abstract class",
-      "# type hints: x:int → explicit type: int x"
-    ],
-    modules: [
-      "from app.model import User → import com.app.model.User",
-      "from . import sibling → same-package import (no keyword needed)",
-      "requirements.txt / pyproject.toml → pom.xml (Maven) or build.gradle",
-      "__all__ = ['X'] → public/private access modifiers"
-    ],
-    async: [
-      "async def fn(): → CompletableFuture<T> fn() { return supplyAsync(()->...); }",
-      "await coro → future.join() (blocking) or .thenApply()",
-      "asyncio.gather(*coros) → CompletableFuture.allOf(futures)",
-      "concurrent.futures.ThreadPoolExecutor → Executors.newFixedThreadPool(n)",
-      "threading.Lock() → synchronized or ReentrantLock"
-    ],
-    versionNotes: [
-      "Target Java 8: Use streams for comprehensions, Optional for None, lambdas, no var keyword",
-      "Target Java 11: var for local variables, HttpClient, Files.readString/writeString, String.isBlank()",
-      "Target Java 17: Records for @dataclass, sealed classes for restricted inheritance, pattern matching",
-      "Target Java 21: Virtual threads for async, record patterns, sequenced collections, unnamed variables _"
-    ]
-  },
-
-  "javascript→typescript": {
-    title: "JavaScript → TypeScript",
-    stdlib: [
-      "No API changes \u2014 TypeScript is a superset of JavaScript",
-      "require({module}) → import module from {module} (ESM)",
-      "module.exports = X → export default X",
-      "exports.fn = fn → export function fn() {} or export { fn }",
-      "require.resolve → import.meta.resolve (ESM)"
-    ],
-    patterns: [
-      "function fn(a,b) → function fn(a: Type, b: Type): ReturnType",
-      "const obj = {} → const obj: InterfaceName = {} (define interface)",
-      "const arr = [] → const arr: Type[] = []",
-      "callback(err,result) → Promise<T> with async/await",
-      "any/untyped params → proper type annotations or generics",
-      "== comparisons → === (strict equality)",
-      "obj.dynamicProp → type with index signature: {[key:string]:Type}",
-      "class with no types → add property types, method signatures",
-      "JSON.parse(s) → JSON.parse(s) as Type (add type assertion)",
-      "event handlers → properly typed: (e:MouseEvent)=>void",
-      "switch without exhaustive → add never default for exhaustive switch",
-      "null checks → strict null checks with ?. and ??"
-    ],
-    modules: [
-      "require() → import (ESM syntax)",
-      "module.exports → export default / named exports",
-      ".js extension → .ts extension (compiles to .js)",
-      "Add .d.ts for external untyped libs: declare module {lib}"
-    ],
-    async: [
-      "Promise chains → async/await where cleaner",
-      "Callback APIs → promisify + async/await with typed returns",
-      "Promise<any> → Promise<SpecificType>"
-    ],
-    types: [
-      "Define interfaces for ALL data shapes (params, returns, configs)",
-      "Use type for unions: type Status = 'active'|'inactive'",
-      "Use enum for fixed sets with semantic meaning",
-      "Use generics: function first<T>(arr:T[]):T|undefined",
-      "Use readonly for immutable properties",
-      "Avoid 'any' \u2014 use 'unknown' + type guards",
-      "Add return types to ALL functions (even void)",
-      "Use Record<K,V> for key-value objects",
-      "Use Partial<T>, Required<T>, Pick<T,K>, Omit<T,K>",
-      "Use discriminated unions for state",
-      "Use 'as const' for literal types"
-    ],
-    versionNotes: [
-      "Target TS 4.x: Variadic tuple types, template literal types, key remapping in mapped types",
-      "Target TS 5.0: Decorators (stage 3), const type parameters, enum improvements",
-      "Target TS 5.6: Iterator helpers, disallowed nullish on non-nullable, strict builtin iterator checks"
-    ]
-  },
-
-  "typescript→javascript": {
-    title: "TypeScript → JavaScript (ES2024)",
-    stdlib: [
-      "No API changes \u2014 remove type system, keep runtime code",
-      "import type { X } from {mod} → remove entirely (type-only)",
-      "import { X, type Y } from {mod} → import { X } from {mod}"
-    ],
-    patterns: [
-      "function fn(a:Type):RetType → function fn(a) (remove types)",
-      "const x:Type = val → const x = val",
-      "interface Foo { } → remove entirely (no runtime representation)",
-      "type Foo = ... → remove entirely",
-      "enum Dir { N='N',S='S' } → const Dir = Object.freeze({N:'N',S:'S'})",
-      "x as Type → x (remove type assertion)",
-      "generic <T>(arr:T[]):T → (arr) (remove generic params)",
-      "readonly prop → no keyword (Object.freeze if needed)",
-      "x! (non-null assertion) → x (remove !)",
-      "x?.y / x ?? y → keep (valid JS)",
-      "abstract class → regular class",
-      "implements Interface → remove",
-      "declare module/var → remove (ambient declarations)",
-      "namespace Foo { } → plain object or module pattern",
-      "satisfies Type → remove"
-    ],
-    modules: [
-      ".ts extension → .js extension",
-      "import type statements → remove entirely",
-      "Keep all runtime import/export statements",
-      ".d.ts files → delete (not needed)"
-    ],
-    async: [
-      "async/await stays the same \u2014 valid JS",
-      "Promise<T> return types → remove <T> annotation"
-    ],
-    versionNotes: [
-      "Target ES5: Remove all TS features, convert class to prototype, arrow to function, const/let to var",
-      "Target ES6: Keep classes, arrows, const/let, template literals — only remove types",
-      "Target ES2020: Keep optional chaining (?.), nullish coalescing (??) — only remove types",
-      "Target ES2024: Keep all modern JS features — only strip TypeScript type annotations"
-    ]
-  },
-  // ═══ Java → Kotlin (Android-focused) ═══
-  "java→kotlin": {
-    title: "Java → Kotlin (Android)",
-    stdlib: [
-      "System.out.println(x) → println(x)",
-      "String.format(fmt,args) → string templates: \u0024{expr} or fmt.format(args)",
-      "Integer.parseInt(s) → s.toInt() / s.toIntOrNull()",
-      "Double.parseDouble(s) → s.toDouble() / s.toDoubleOrNull()",
-      "Collections.unmodifiableList(list) → list.toList() (returns read-only List)",
-      "Collections.singletonList(x) → listOf(x)",
-      "Arrays.asList(a,b,c) → listOf(a,b,c) or mutableListOf(a,b,c)",
-      "new ArrayList<>() → mutableListOf<T>()",
-      "new HashMap<>() → mutableMapOf<K,V>() or hashMapOf()",
-      "new HashSet<>() → mutableSetOf<T>() or hashSetOf()",
-      "map.put(k,v) → map[k] = v (operator overload)",
-      "map.get(k) → map[k] (returns nullable T?)",
-      "map.containsKey(k) → k in map",
-      "list.get(i) → list[i]",
-      "list.size() → list.size (property, no parentheses)",
-      "str.length() → str.length (property)",
-      "str.charAt(i) → str[i]",
-      "str.substring(a,b) → str.substring(a,b) or str.slice(a..b)",
-      "str.equals(other) → str == other (structural equality)",
-      "str.equalsIgnoreCase(s) → str.equals(s, ignoreCase=true)",
-      "obj == other (reference) → obj === other (referential equality)",
-      "instanceof → is (smart cast: if (x is String) x.length works)",
-      "(Type) obj cast → obj as Type / obj as? Type (safe cast)",
-      "Object → Any / Any?",
-      "void → Unit",
-      "Void (boxed) → Nothing? or Unit",
-      "final → val (immutable variable)",
-      "Math.max(a,b) → maxOf(a,b) / kotlin.math.max(a,b)",
-      "Math.min(a,b) → minOf(a,b)",
-      "Math.abs(x) → kotlin.math.abs(x) or x.absoluteValue",
-      "Thread.sleep(ms) → delay(ms) (suspend function, coroutines)",
-      "System.currentTimeMillis() → System.currentTimeMillis() or Clock.System.now()",
-      "Optional.of(x) → nullable type T? (no Optional needed)",
-      "Optional.empty() → null",
-      "optional.isPresent() → value != null",
-      "optional.get() → value!! (non-null assertion) or value ?: default",
-      "optional.orElse(def) → value ?: def (Elvis operator)",
-      "try-with-resources → .use { } extension function",
-      "synchronized(lock) {} → synchronized(lock) {} or Mutex (coroutines)",
-      "Iterable.forEach(Consumer) → .forEach { } (trailing lambda)",
-      "stream().map(fn) → .map { } (direct on collection, no stream())",
-      "stream().filter(p) → .filter { }",
-      "stream().collect(toList()) → .toList() or .toMutableList()",
-      "stream().findFirst() → .firstOrNull()",
-      "stream().anyMatch(p) → .any { }",
-      "stream().allMatch(p) → .all { }",
-      "stream().reduce() → .reduce() or .fold(initial) { }",
-      "stream().flatMap() → .flatMap { }",
-      "Collectors.toMap() → .associate { } or .associateBy { }",
-      "Collectors.groupingBy() → .groupBy { }",
-      "Collectors.joining(sep) → .joinToString(sep)"
-    ],
-    patterns: [
-      "public class Foo {} → class Foo {} (public by default in Kotlin)",
-      "private final String name; + getter → val name: String (read-only property)",
-      "private String name; + getter + setter → var name: String (mutable property)",
-      "POJO with getters/setters → data class Foo(val name: String, var age: Int)",
-      "equals()/hashCode()/toString() boilerplate → data class (auto-generated)",
-      "static final CONST = x → companion object { const val CONST = x }",
-      "static method → companion object { fun method() } or top-level function",
-      "static utility class → top-level functions in file (no class needed)",
-      "Builder pattern → named parameters + default values: fun create(name: String, age: Int = 0)",
-      "new Foo() → Foo() (no new keyword)",
-      "anonymous inner class → object : Interface { } or lambda",
-      "Comparator anonymous class → compareBy { it.field } or Comparator lambda",
-      "enum with fields → enum class Status(val code: Int) { ACTIVE(1), INACTIVE(0) }",
-      "sealed interface → sealed class/interface + data class subclasses",
-      "switch-case → when (expr) { pattern -> result } (exhaustive for sealed)",
-      "for (Type x : collection) → for (x in collection)",
-      "for (int i=0;i<n;i++) → for (i in 0 until n) or repeat(n) { }",
-      "while + iterator → for (item in iterable) or .forEach { }",
-      "ternary a ? b : c → if (a) b else c (if is expression)",
-      "null check if(x!=null) → x?.let { } or if (x != null) (smart cast)",
-      "throw NPE on null → ?: throw or requireNotNull(x)",
-      "multiple null checks → safe call chain: a?.b?.c?.d",
-      "try-catch → try-catch (same, but runCatching { } also available)",
-      "checked exceptions → no checked exceptions in Kotlin (@Throws for Java interop)",
-      "interface + abstract methods → interface (can have default implementations)",
-      "abstract class → abstract class (same concept)",
-      "@Override → override keyword (mandatory, no annotation)",
-      "String concatenation + → string template \u0024{expr} or \u0024var",
-      "Type[] array → Array<Type> or IntArray/LongArray/etc for primitives",
-      "varargs Type... → vararg param: Type",
-      "Pair<A,B> → Pair(a,b) with destructuring: val (first, second) = pair",
-      "Map.Entry<K,V> → destructuring in loop: for ((key, value) in map)",
-      "singleton class → object Singleton { } (object declaration)",
-      "lazy initialization → val x by lazy { expensive() }",
-      "delegation pattern → class Foo(list: List<T>) : List<T> by list"
-    ],
-    android: [
-      "// ═══ Android-Specific Migrations ═══",
-      "Activity.findViewById(R.id.x) → ViewBinding: binding.x or Compose",
-      "Fragment.onCreateView + inflate → ViewBinding or ComposeView in Fragment",
-      "AsyncTask<P,Prog,R> → viewModelScope.launch { withContext(Dispatchers.IO) { } }",
-      "AsyncTask.execute() → lifecycleScope.launch { } (lifecycle-aware)",
-      "new Thread(runnable).start() → CoroutineScope.launch(Dispatchers.Default) { }",
-      "Handler(Looper.getMainLooper()).post {} → withContext(Dispatchers.Main) { }",
-      "runOnUiThread { } → withContext(Dispatchers.Main) { } inside coroutine",
-      "IntentService → WorkManager for background work",
-      "LocalBroadcastManager → SharedFlow / StateFlow / LiveData observer",
-      "startActivityForResult() → registerForActivityResult(ActivityResultContracts.X())",
-      "onActivityResult() → ActivityResultCallback in registerForActivityResult",
-      "Loader/CursorLoader → ViewModel + Repository + Flow/LiveData",
-      "ContentProvider direct query → Repository pattern + Room DAO",
-      "SQLiteOpenHelper → Room Database + @Entity + @Dao + @Database",
-      "SharedPreferences.edit().putX().apply() → DataStore<Preferences> (proto or preferences)",
-      "PreferenceFragment → PreferenceFragmentCompat (AndroidX)",
-      "android.support.v4.* → androidx.* (AndroidX migration)",
-      "android.support.v7.* → androidx.appcompat.* / androidx.recyclerview.*",
-      "AppCompatActivity (support) → AppCompatActivity (androidx.appcompat.app)",
-      "RecyclerView.Adapter + ViewHolder → ListAdapter + DiffUtil (or LazyColumn in Compose)",
-      "XML Layout + ConstraintLayout → Compose: Column/Row/Box + Modifier",
-      "XML styles/themes → MaterialTheme + CompositionLocal in Compose",
-      "XML menu + onOptionsItemSelected → TopAppBar actions in Compose",
-      "XML navigation graph → Compose Navigation: NavHost + composable(route)",
-      "Fragment transactions → Compose Navigation (no fragment manager)",
-      "TabLayout + ViewPager2 → Compose HorizontalPager + TabRow",
-      "AlertDialog.Builder → AlertDialog composable in Compose",
-      "Toast.makeText() → Snackbar with SnackbarHost in Compose",
-      "ProgressBar XML → CircularProgressIndicator() / LinearProgressIndicator()",
-      "LiveData.observe(owner) { } → StateFlow + collectAsState() in Compose",
-      "MutableLiveData.value = x → MutableStateFlow.value = x or mutableStateOf(x)",
-      "ViewModel + LiveData → ViewModel + StateFlow + UiState sealed class (MVI)",
-      "MVP: Presenter interface → ViewModel + UiState + UiEvent (MVVM/MVI)",
-      "MVC: Activity doing everything → ViewModel + Repository + UseCase (Clean Arch)",
-      "Dagger/Dagger-Android → Hilt (@HiltAndroidApp, @AndroidEntryPoint, @Inject)",
-      "manual DI / ServiceLocator → Hilt modules (@Module, @Provides, @Singleton)",
-      "Retrofit callback → Retrofit suspend fun + coroutines",
-      "OkHttp Interceptor (Java) → OkHttp Interceptor (Kotlin, same API)",
-      "Gson → Kotlin Serialization (@Serializable) or Moshi (KotlinJsonAdapterFactory)",
-      "RxJava Observable/Single → Kotlin Flow / StateFlow / SharedFlow",
-      "RxJava Schedulers → Coroutine Dispatchers (IO, Main, Default)",
-      "RxJava CompositeDisposable → CoroutineScope cancellation (structured concurrency)",
-      "EventBus → SharedFlow for events, StateFlow for state",
-      "Butter Knife @BindView → ViewBinding or Compose (ButterKnife deprecated)",
-      "Picasso/Glide (XML) → Coil (Compose: AsyncImage) or Glide Compose",
-      "JUnit4 + Mockito → JUnit5 + MockK (Kotlin-first mocking)",
-      "Espresso UI tests → Compose Testing: composeTestRule + onNodeWithText",
-      "R.string.x → stringResource(R.string.x) in Compose",
-      "getResources().getString() → context.getString() or stringResource() in Compose"
-    ],
-    modules: [
-      "import com.pkg.Class; → import com.pkg.Class (same, but type alias available)",
-      "static import → top-level function (no static import needed)",
-      "Java source folder → Kotlin source folder (src/main/kotlin or src/main/java both work)",
-      "build.gradle (Groovy) → build.gradle.kts (Kotlin DSL)",
-      "apply plugin: X → plugins { id(X) } in Kotlin DSL",
-      "compileSdkVersion 33 → compileSdk = 33 (Kotlin DSL property assignment)",
-      "implementation X → implementation(X) in Kotlin DSL (parentheses)",
-      "kapt X → ksp(X) (prefer KSP over KAPT for annotation processing)",
-      "android.enableJetifier=true → remove if fully migrated to AndroidX"
-    ],
-    async: [
-      "AsyncTask.doInBackground() → withContext(Dispatchers.IO) { }",
-      "AsyncTask.onPostExecute() → result arrives in Main dispatcher (structured concurrency)",
-      "AsyncTask.onProgressUpdate() → emit progress via Flow or StateFlow",
-      "ExecutorService.submit() → async { } + await() in coroutine scope",
-      "Future.get() (blocking) → Deferred.await() (suspending, non-blocking)",
-      "CountDownLatch → suspendCancellableCoroutine or Channel",
-      "Thread.sleep(ms) → delay(ms) (suspending, does not block thread)",
-      "Callback<T> interface → suspend fun returning T directly",
-      "Callback hell (nested) → sequential suspend calls (flat, readable)",
-      "RxJava subscribeOn/observeOn → flowOn(Dispatchers.IO) / collect on Main",
-      "Observable.create {} → flow { emit(value) } (cold Flow)",
-      "BehaviorSubject → MutableStateFlow(initialValue)",
-      "PublishSubject → MutableSharedFlow()",
-      "Single.zip() → coroutineScope { async {} + async {} } then combine results",
-      "RxJava .flatMap() → Flow .flatMapConcat { } / .flatMapMerge { }"
-    ],
-    versionNotes: [
-      "Target Kotlin 1.5: Stable coroutines, value classes (@JvmInline), sealed interfaces",
-      "Target Kotlin 1.6: Stable builder inference, suspend conversions, ksp improvements",
-      "Target Kotlin 1.7: Opt-in annotations stable, min/maxOrNull, builder inference improvements",
-      "Target Kotlin 1.8: JVM 1.8+ baseline, kotlin-reflect improvements, new JVM backend stable",
-      "Target Kotlin 1.9: Kotlin/Wasm preview, ..<operator (rangeUntil), stable @ConsistentCopyVisibility, data object declarations, enum entries function",
-      "Target Kotlin 2.0: K2 compiler (2x faster), stable smart casts in closures, new resolution algorithm, Compose compiler plugin bundled",
-      "Target Kotlin 2.1: Guard conditions in when, multi-dollar string interpolation \u0024\u0024{}, non-local break/continue, improved K2 diagnostics"
-    ]
-  },
-  // ═══ Kotlin → Java (Android reverse) ═══
-  "kotlin→java": {
-    title: "Kotlin → Java (Android)",
-    stdlib: [
-      "println(x) → System.out.println(x)",
-      "string template \u0024{expr} → String.format() or concatenation",
-      "s.toInt() / s.toIntOrNull() → Integer.parseInt(s) with try-catch",
-      "listOf(a,b) → Collections.unmodifiableList(Arrays.asList(a,b)) or List.of(a,b) (Java 9+)",
-      "mutableListOf<T>() → new ArrayList<T>()",
-      "mutableMapOf<K,V>() → new HashMap<K,V>()",
-      "map[k] = v → map.put(k, v)",
-      "map[k] → map.get(k)",
-      "k in map → map.containsKey(k)",
-      "list.size (property) → list.size()",
-      "str.length (property) → str.length()",
-      "x is Type (smart cast) → instanceof + explicit cast",
-      "x as Type / x as? Type → (Type) x with instanceof check",
-      "Any / Any? → Object",
-      "Unit → void",
-      "val (immutable) → final modifier",
-      "maxOf(a,b) / minOf(a,b) → Math.max(a,b) / Math.min(a,b)",
-      "nullable T? → @Nullable T + Optional<T> or null checks",
-      "value ?: default (Elvis) → value != null ? value : default",
-      "x?.let { } → if (x != null) { /* use x */ }",
-      "safe call a?.b?.c → nested null checks: if (a!=null && a.b!=null) a.b.c",
-      ".use { } → try-with-resources: try (var r = resource) { }",
-      ".map { } on collection → .stream().map(x -> ...).collect(toList())",
-      ".filter { } → .stream().filter(x -> ...).collect(toList())",
-      ".any { } → .stream().anyMatch(x -> ...)",
-      ".firstOrNull() → .stream().findFirst().orElse(null)",
-      ".associate { } → .stream().collect(Collectors.toMap(...))",
-      ".groupBy { } → .stream().collect(Collectors.groupingBy(...))",
-      ".joinToString(sep) → .stream().collect(Collectors.joining(sep))",
-      "delay(ms) (suspend) → Thread.sleep(ms) or ScheduledExecutor"
-    ],
-    patterns: [
-      "class Foo (public default) → public class Foo (explicit public)",
-      "val name: String (property) → private final String name; + getName()",
-      "var name: String → private String name; + getName() + setName()",
-      "data class → class with equals/hashCode/toString/copy manually",
-      "companion object { const val X } → public static final X",
-      "companion object { fun x() } → public static method",
-      "top-level function → static method in utility class",
-      "object Singleton → singleton pattern (private constructor + static instance)",
-      "named parameters → Builder pattern or method overloading",
-      "default parameter values → method overloading: foo(), foo(a), foo(a,b)",
-      "Foo() (no new) → new Foo()",
-      "when (exhaustive) → switch-case (or if-else chain)",
-      "for (x in collection) → for (Type x : collection)",
-      "for (i in 0 until n) → for (int i=0; i<n; i++)",
-      "if expression → ternary a ? b : c",
-      "string template → String.format or + concatenation",
-      "sealed class → abstract class + instanceof checks (or sealed interface Java 17+)",
-      "enum class with properties → enum with fields + constructor",
-      "override fun → @Override annotation",
-      "vararg param → Type... param (varargs)",
-      "destructuring val (a,b) = pair → pair.getFirst(); pair.getSecond()",
-      "by lazy { } → lazy init with double-checked locking or Supplier",
-      "extension function → static utility method with first param as receiver",
-      "infix fun → regular method call: a.to(b) instead of a to b",
-      "operator overload [] → explicit get()/set() methods"
-    ],
-    android: [
-      "// ═══ Android Kotlin → Java reverse ═══",
-      "ViewBinding binding.x → findViewById(R.id.x) or ViewBinding (Java supported)",
-      "viewModelScope.launch { } → ExecutorService or AsyncTask (legacy) or RxJava",
-      "lifecycleScope.launch { } → lifecycle observer + executor",
-      "withContext(Dispatchers.IO) { } → Executors.newSingleThreadExecutor().submit()",
-      "StateFlow.collectAsState() → LiveData.observe() in XML + ViewModel",
-      "MutableStateFlow → MutableLiveData<T>",
-      "Flow { emit() } → RxJava Observable.create() or LiveData",
-      "Compose @Composable fun → XML layout + Fragment/Activity",
-      "Compose Navigation → Navigation Component + Fragment destinations",
-      "Compose LazyColumn → RecyclerView + Adapter + ViewHolder",
-      "Hilt @Inject → Dagger @Inject or manual DI",
-      "@AndroidEntryPoint → DaggerAppCompatActivity or manual component",
-      "Kotlin Serialization → Gson or Jackson",
-      "suspend fun apiCall() → Call<T> or Single<T> (RxJava)",
-      "MockK mock → Mockito.mock(Class.class)"
-    ],
-    modules: [
-      "import same as Java (fully compatible)",
-      "build.gradle.kts → build.gradle (Groovy)",
-      "plugins { id(X) } → apply plugin: X",
-      "ksp(X) → annotationProcessor(X) or kapt(X)",
-      "top-level functions file → public final class FileNameKt with static methods"
-    ],
-    async: [
-      "coroutineScope { launch { } } → ExecutorService + Future",
-      "async { } + await() → CompletableFuture (Java 8+) or Future.get()",
-      "suspend fun → Callback<T> interface or CompletableFuture<T>",
-      "flow { emit(x) } → Observable.create(emitter -> emitter.onNext(x))",
-      "StateFlow → BehaviorSubject (RxJava) or MutableLiveData",
-      "SharedFlow → PublishSubject (RxJava)",
-      "flowOn(Dispatchers.IO) → .subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread())",
-      "structured concurrency → manual cancellation with CompositeDisposable or executor shutdown",
-      "Channel → BlockingQueue or RxJava Subject",
-      "supervisorScope { } → independent try-catch per task with executor"
-    ],
-    versionNotes: [
-      "Target Java 8: Lambdas, streams, CompletableFuture, Optional, method references, default methods",
-      "Target Java 11: var (local), HttpClient, String methods (strip, isBlank, lines, repeat)",
-      "Target Java 17: sealed classes, records, pattern matching instanceof, text blocks, switch expressions",
-      "Target Java 21: Virtual threads, record patterns, sequenced collections, string templates (preview)"
-    ]
-  }
-};
-
-function getParadigmMap(sl, tl) {
-  var key = sl + "→" + tl;
-  return PARADIGM_MAPS[key] || null;
-}
-
-// ═══ Adaptive Capacity Calculator — analysis-driven processing profiles ═══
-// The codebase analysis produces per-file processingHints that feed directly
-// into token budgets, timeouts, and paradigm map depth.
-function calcCapacity(complexity, lineCount, isCross, estimatedChanges, hints) {
-  // hints = { deprecatedAPIs:N, asyncChanges:N, importChanges:N, structuralChanges:N,
-  //           typeChanges:N, errorHandling:N, totalSignals:N }
-  var h = hints || {};
-  var tier = complexity === "complex" ? 3 : complexity === "moderate" ? 2 : 1;
-  var crossMult = isCross ? 1.3 : 1.0;
-
-  // Signal density: how many actual transformations per line of code
-  var signalCount = h.totalSignals || estimatedChanges || 0;
-  var signalDensity = signalCount ? Math.min(2.0, 1.0 + (signalCount / Math.max(1, lineCount))) : 1.0;
-
-  // Async complexity: files migrating async models need significantly more processing
-  var asyncMult = h.asyncChanges > 3 ? 1.35 : h.asyncChanges > 0 ? 1.15 : 1.0;
-
-  // Structural complexity: class hierarchies, interfaces, inheritance changes
-  var structMult = h.structuralChanges > 4 ? 1.25 : h.structuralChanges > 1 ? 1.1 : 1.0;
-
-  // Deprecated API density: many API replacements = more output tokens
-  var apiMult = h.deprecatedAPIs > 8 ? 1.3 : h.deprecatedAPIs > 3 ? 1.15 : 1.0;
-
-  // Combined multiplier (capped)
-  var combined = Math.min(2.5, crossMult * signalDensity * asyncMult * structMult * apiMult);
-
-  // Plan capacity — scaled by tier and combined complexity
-  var basePlanTk = [1200, 2200, 3200][tier - 1];
-  var planTokens = Math.min(4500, Math.round(basePlanTk * combined));
-  var planTimeout = [25000, 35000, 50000][tier - 1];
-
-  // Migration capacity — the core budget, scales with everything
-  var baseMigTk = [3000, 5500, 7500][tier - 1];
-  var lineBonus = Math.min(3000, Math.floor(Math.max(0, lineCount - 15) / 8) * 200);
-  var migTokens = Math.min(12000, Math.round((baseMigTk + lineBonus) * combined));
-  var migTimeout = [40000, 55000, 75000][tier - 1];
-
-  // Paradigm map depth: how many mappings to inject (more for complex files)
-  var paradigmSlice = tier >= 3 ? 25 : tier >= 2 ? 18 : 10;
-  if (h.deprecatedAPIs > 5) paradigmSlice = Math.min(30, paradigmSlice + 5);
-
-  // Auto-promote tier if signals justify it (e.g. analysis said "simple" but 10+ API changes)
-  var effectiveTier = tier;
-  if (tier === 1 && signalCount > 8) effectiveTier = 2;
-  if (tier === 2 && signalCount > 15 && (h.asyncChanges > 2 || h.structuralChanges > 3)) effectiveTier = 3;
-  if (effectiveTier !== tier) {
-    // Recalculate with promoted tier
-    basePlanTk = [1200, 2200, 3200][effectiveTier - 1];
-    planTokens = Math.min(4500, Math.round(basePlanTk * combined));
-    planTimeout = [25000, 35000, 50000][effectiveTier - 1];
-    baseMigTk = [3000, 5500, 7500][effectiveTier - 1];
-    migTokens = Math.min(12000, Math.round((baseMigTk + lineBonus) * combined));
-    migTimeout = [40000, 55000, 75000][effectiveTier - 1];
-  }
-
-  return {
-    tier: effectiveTier,
-    originalTier: tier,
-    promoted: effectiveTier !== tier,
-    planTokens: planTokens,
-    planTimeout: planTimeout,
-    migTokens: migTokens,
-    migTimeout: migTimeout,
-    paradigmSlice: paradigmSlice,
-    label: ["simple", "moderate", "complex"][effectiveTier - 1],
-    multipliers: { cross: crossMult, signal: signalDensity, async: asyncMult, struct: structMult, api: apiMult, combined: combined },
-    signals: h
-  };
-}
-
-function mapTargetFile(origName,origPath,srcLang,tgtLang) {
-  if (srcLang===tgtLang) return {name:origName,path:origPath}; // version upgrade: keep same
-  var base=origName.replace(/\.[^.]+$/,"");
-  var srcExt=TARGET_EXT[srcLang]||"";
-  var tgtExt=TARGET_EXT[tgtLang]||"";
-  // Apply target naming conventions
-  var newBase=base;
-  if (tgtLang==="java"||tgtLang==="csharp"||tgtLang==="kotlin") {
-    // PascalCase
-    newBase=base.replace(/(^|[_-])([a-z])/g,function(_,p,c){return c.toUpperCase()}).replace(/[_-]/g,"");
-  } else if (tgtLang==="python"||tgtLang==="ruby"||tgtLang==="go"||tgtLang==="rust") {
-    // snake_case
-    newBase=base.replace(/([A-Z])/g,function(m,c,i){return (i>0?"_":"")+c.toLowerCase()}).replace(/[- ]/g,"_").replace(/__+/g,"_");
-  }
-  // camelCase for JS/TS (keep as-is if already camelCase or use lowercase)
-  var newName=newBase+tgtExt;
-  var newPath=origPath?origPath.replace(origName,newName).replace(/\.[^.]+$/,tgtExt):newName;
-  return {name:newName,path:newPath};
-}
-
-var MODELS = [
-  {id:"claude-haiku-4-5-20251001",n:"Haiku 4.5",badge:"Rápido",bc:"#059669",spd:"~2s",q:3,pi:0.80,po:4.00},
-  {id:"claude-sonnet-4-5-20250929",n:"Sonnet 4.5",badge:"Recomendado",bc:"#2563EB",spd:"~5s",q:4,pi:3.00,po:15.00},
-  {id:"claude-opus-4-6",n:"Opus 4.6",badge:"Premium",bc:"#7c3aed",spd:"~15s",q:5,pi:15.00,po:75.00}
-];
-
-// Global mutable token tracker — callClaude writes here, UI reads via tick re-render
-var _tks={i:0,o:0,calls:0,last:{i:0,o:0}};
-var _activeController=null; // current fetch AbortController — cancel button aborts this
-var _cancelled=false; // global cancel flag — checked before each API call
+// _tks, _activeController, _cancelled, callClaude, calcCapacity imported from ./services/claudeClient.js
 
 var DPROMPTS = {
   mig:{
@@ -1603,80 +122,7 @@ function detectLang(fn) {
   return null;
 }
 
-function detectVer(lang, code) {
-  if (!code || !lang) return {v:null,c:0,s:[]};
-  var sg = [], ct = 0;
-  var tests = [];
-  if (lang === "python") {
-    tests = [[/\bprint\s+["']/m,"print stmt"],[/\.iteritems/m,".iteritems"],[/\.has_key/m,".has_key"],[/\bimport\s+urllib2/m,"urllib2"],[/\bimport\s+ConfigParser/m,"ConfigParser"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"2.7"}); } }
-    if (ct>0) return {v:"2.7",c:Math.min(95,60+ct*8),s:sg};
-    return {v:"3.6",c:30,s:[]};
-  }
-  if (lang === "javascript") {
-    tests = [[/\bvar\s+\w+/m,"var"],[/\.prototype\./m,"prototype"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"ES5"}); } }
-    if (ct>0) return {v:"ES5",c:Math.min(95,60+ct*10),s:sg};
-    return {v:"ES6/ES2015",c:40,s:[]};
-  }
-  if (lang === "java") {
-    tests = [[/Collections\.sort/m,"Collections.sort"],[/new\s+SimpleDateFormat/m,"SimpleDateFormat"],[/new\s+Comparator/m,"Comparator"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"8"}); } }
-    // Android-specific signals
-    var andSig = [[/\bAsyncTask\b/m,"AsyncTask"],[/\bAppCompatActivity\b/m,"AppCompat"],[/\bfindViewById\b/m,"findViewById"],[/android\.support\./m,"support lib"],[/\bLocalBroadcastManager\b/m,"LocalBroadcast"],[/\bstartActivityForResult\b/m,"startActivityForResult"]];
-    var andCt = 0;
-    for (var i=0;i<andSig.length;i++) { if (andSig[i][0].test(code)) { andCt++; sg.push({t:andSig[i][1],i:"Android"}); } }
-    return {v:"8",c:ct||andCt?Math.min(95,55+(ct+andCt)*7):40,s:sg};
-  }
-  if (lang === "csharp") {
-    tests = [[/System\.Web/m,"System.Web"],[/ConfigurationManager/m,"ConfigMgr"],[/\blog4net\b/m,"log4net"],[/BeginInvoke/m,"BeginInvoke"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:".NET FW"}); } }
-    if (ct>0) return {v:".NET Framework 4.8",c:Math.min(95,60+ct*8),s:sg};
-    return {v:".NET Framework 4.8",c:35,s:[]};
-  }
-  if (lang === "go") {
-    tests = [[/\bgo\s+func/m,"goroutine"],[/\bchan\s/m,"channel"],[/\bany\b/m,"any type"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"1.18+"}); } }
-    if (/\bgo\s+1\./m.test(code)) return {v:"1.18",c:50,s:sg};
-    return {v:ct>0?"1.21":"1.18",c:ct?Math.min(80,50+ct*10):30,s:sg};
-  }
-  if (lang === "rust") {
-    tests = [[/\basync\s+fn/m,"async fn"],[/\bimpl\b/m,"impl"],[/\blet\s+mut\b/m,"mut"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"2021"}); } }
-    return {v:ct>0?"2021":"2018",c:ct?Math.min(80,50+ct*10):30,s:sg};
-  }
-  if (lang === "php") {
-    tests = [[/\bfn\s*\(/m,"arrow fn"],[/\?\->/m,"nullsafe"],[/\bmatch\s*\(/m,"match"],[/\benum\s+/m,"enum"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"8.0+"}); } }
-    if (ct>0) return {v:"8.0",c:Math.min(85,55+ct*8),s:sg};
-    return {v:"7.4",c:40,s:[]};
-  }
-  if (lang === "ruby") {
-    tests = [[/\bputs\b/m,"puts"],[/\battr_accessor\b/m,"attr"],[/\bdo\s*\|/m,"block"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"2.7+"}); } }
-    return {v:ct?"3.0":"2.7",c:ct?Math.min(75,45+ct*10):30,s:sg};
-  }
-  if (lang === "kotlin") {
-    // Kotlin 2.0+ signals (K2 compiler features)
-    var k2tests = [[/\bvalue\s+class/m,"value class"],[/\bContext\s*Receivers?/m,"context receivers"],[/\.\.<\b/m,"rangeUntil ..<"]];
-    for (var i=0;i<k2tests.length;i++) { if (k2tests[i][0].test(code)) { ct++; sg.push({t:k2tests[i][1],i:"2.0+"}); } }
-    if (ct>0) return {v:"2.0",c:Math.min(90,60+ct*10),s:sg};
-    // Kotlin 1.8-1.9 signals
-    var k19tests = [[/\bdata\s+object/m,"data object"],[/\.entries\b/m,"enum entries"]];
-    for (var i=0;i<k19tests.length;i++) { if (k19tests[i][0].test(code)) { ct++; sg.push({t:k19tests[i][1],i:"1.9"}); } }
-    if (ct>0) return {v:"1.9",c:Math.min(85,55+ct*10),s:sg};
-    // Kotlin 1.5-1.7 / general signals
-    tests = [[/\bdata\s+class/m,"data class"],[/\bsealed\s+(class|interface)/m,"sealed"],[/\bsuspend\s+fun/m,"suspend fun"],[/\bcompanion\s+object/m,"companion"],[/\bwhen\s*\x28/m,"when expr"],[/\bby\s+lazy/m,"lazy delegate"]];
-    for (var i=0;i<tests.length;i++) { if (tests[i][0].test(code)) { ct++; sg.push({t:tests[i][1],i:"1.5+"}); } }
-    // Android-specific signals
-    var andTests = [[/\bAsyncTask\b/m,"AsyncTask"],[/\bLocalBroadcastManager\b/m,"LocalBroadcast"],[/\bstartActivityForResult\b/m,"startActivityForResult"],[/\bfindViewById\b/m,"findViewById"],[/android\.support\./m,"support library"]];
-    for (var i=0;i<andTests.length;i++) { if (andTests[i][0].test(code)) { ct++; sg.push({t:andTests[i][1],i:"Android legacy"}); } }
-    if (ct>=4) return {v:"1.5",c:Math.min(90,55+ct*7),s:sg};
-    if (ct>0) return {v:"1.7",c:Math.min(80,45+ct*8),s:sg};
-    return {v:"1.7",c:35,s:sg};
-  }
-  return {v:null,c:0,s:[]};
-}
+// detectVer extracted to ./services/migrationPhases.js
 
 function doAnalyze(code, lang, tv) {
   var lg = [], lines = code.split("\n"), lc = lines.length;
@@ -1734,57 +180,7 @@ function doAnalyze(code, lang, tv) {
   return {ok:e===0,logs:lg,stats:{e:e,w:w,l:lc}};
 }
 
-async function doDeepAnalysis(origFiles,migratedResults,sl,sv,tl,tv,mid,lang) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var lnames={es:"Español",en:"English",pt:"Português"};
-  var ln=lnames[lang]||"Español";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+(r.targetPath?" ("+r.targetPath+")":"")+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-  var sys="You are a STRICT senior architect reviewing a "+sn+" "+sv+"→"+tn+" "+tv+" migration ("+migratedResults.length+" files). Respond in "+ln+".\n\nAnalyze 8 layers INDEPENDENTLY with concrete findings per file:\n1) Architecture (15%) 2) Cross-file deps (10%) 3) Async model (15%) 4) Security (20%) 5) Error handling (10%) 6) Types/contracts (10%) 7) Data flow (10%) 8) API preservation (10%)\n\n"+SCORING_RUBRIC+"\n\nScore each layer first. Final score = weighted average. Show math.\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"weighted math\",\"layers\":[{\"name\":\"...\",\"score\":0-100,\"status\":\"pass|warn|fail\",\"detail\":\"1-2 sentences\"}],\"critical\":[{\"files\":[\"file.ext\"],\"category\":\"security|architecture|async|types|dataflow\",\"msg\":\"...\",\"fix\":\"fix\"}],\"improvements\":[{\"files\":[\"file.ext\"],\"category\":\"...\",\"msg\":\"...\",\"suggestion\":\"...\"}],\"strengths\":[\"...\"],\"summary\":\"2-3 sentences\"}";
-  var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nDeep SYSTEM-LEVEL analysis. Score each layer independently, compute weighted average. Be strict — typical migration scores 65-80. ALL text in "+ln+". Respond ONLY JSON.";
-  try {
-    var txt=await callClaude(sys,usr,mid,3000,{timeout:60000});
-    var cl=safeParseJSON(txt);
-    if(!cl)throw new Error("Invalid JSON response");
-    // Same JS-side recalculation as integration check
-    if (cl.layers&&cl.layers.length>=6) {
-      var weights={architecture:15,"cross-file deps":10,"cross-file":10,async:15,"async model":15,security:20,errors:10,"error handling":10,types:10,"types/contracts":10,dataflow:10,"data flow":10,idiomatic:10,"api preservation":10,imports:10};
-      var wSum=0, wTotal=0;
-      cl.layers.forEach(function(ly){
-        var key=(ly.name||"").toLowerCase().replace(/[^a-z /\-]/g,"");
-        var w=weights[key]||10;
-        wSum+=(ly.score||0)*w;
-        wTotal+=w;
-      });
-      var derived=wTotal>0?Math.round(wSum/wTotal):cl.score;
-      if (Math.abs(derived-(cl.score||0))>8) {
-        cl.scoreBreakdown=(cl.scoreBreakdown||"")+" [Recalculated: model said "+cl.score+", layers give "+derived+"]";
-        cl.score=derived;
-      }
-    }
-    return {ok:true,analysis:cl};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-
-// ═══ Android Pre-Migration Report Generator ═══
-async function generateAndroidReport(files, sl, sv, tl, tv, mid, lang) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var lnames={es:"Español",en:"English",pt:"Português"};
-  var ln=lnames[lang]||"Español";
-  var codeManifest=files.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  
-  var sys="You are a Senior Android Architect performing a comprehensive pre-migration analysis of an Android codebase. The migration is from "+sn+" "+sv+" to "+tn+" "+tv+". Respond in "+ln+".\n\nAnalyze the codebase across these dimensions:\n\n1. **DEPRECATED APIs**: List every deprecated Android API found, its replacement, and migration effort\n2. **ARCHITECTURE**: Current pattern (MVC/MVP/MVVM/none) and target architecture recommendation\n3. **UI FRAMEWORK**: XML Views vs Compose readiness, migration path\n4. **ASYNC MODEL**: AsyncTask/Thread/RxJava/Handler patterns → Coroutines migration\n5. **DEPENDENCY INJECTION**: Current DI approach → Hilt recommendation\n6. **DATA LAYER**: DB/SharedPrefs/Network patterns → Room/DataStore/Retrofit\n7. **SECURITY**: Hardcoded secrets, unvalidated inputs, insecure network calls\n8. **MODULARIZATION**: Current module structure, recommended module boundaries\n9. **LIBRARY UPDATES**: Dependencies that need updating with recommended versions\n10. **GRADLE/BUILD**: Build config modernization (Kotlin DSL, version catalogs)\n\nFor each finding, include:\n- File and line reference\n- Current pattern\n- Target pattern\n- Impact: critical/major/minor\n- Effort: high/medium/low\n- Priority order for migration\n\nProduce a REFACTORING PLAN with ordered phases:\n- Phase 1: Foundation (AndroidX, DI setup, base classes)\n- Phase 2: Architecture (ViewModel, Repository, UseCases)\n- Phase 3: Async (Coroutines migration)\n- Phase 4: UI (Compose migration for key screens)\n- Phase 5: Testing & Polish\n\nRespond ONLY valid JSON:\n{\"summary\":\"2-3 paragraph executive summary\",\"architecture\":{\"current\":\"...\",\"target\":\"...\",\"effort\":\"high|medium|low\"},\"breaches\":[{\"category\":\"deprecated|architecture|security|async|ui|di|data|gradle\",\"file\":\"...\",\"line\":0,\"current\":\"what exists now\",\"target\":\"what it should become\",\"impact\":\"critical|major|minor\",\"effort\":\"high|medium|low\"}],\"refactorPlan\":[{\"phase\":1,\"name\":\"...\",\"description\":\"...\",\"tasks\":[\"...\"],\"estimatedEffort\":\"...\"}],\"libraryUpdates\":[{\"current\":\"lib:version\",\"recommended\":\"lib:newversion\",\"breaking\":true|false}],\"modularization\":{\"current\":\"...\",\"recommended\":[{\"module\":\"...\",\"contents\":[\"...\"]}]},\"riskScore\":0-100,\"readinessScore\":0-100}";
-  
-  var usr="ANDROID CODEBASE ("+sn+" "+sv+"):\n"+codeManifest+"\n\nPerform EXHAUSTIVE pre-migration analysis. Be specific with file:line references. ALL text in "+ln+". Respond ONLY JSON.";
-  
-  try {
-    var txt=await callClaude(sys,usr,mid,4000,{timeout:75000});
-    var cl=safeParseJSON(txt);
-    if(!cl)throw new Error("Invalid JSON response");
-    return {ok:true,report:cl};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
+// doDeepAnalysis, generateAndroidReport extracted to ./services/migrationPhases.js
 
 function generateReportHTML(report, files, sl, sv, tl, tv, t) {
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
@@ -1871,192 +267,9 @@ function generateReportHTML(report, files, sl, sv, tl, tv, t) {
   return html;
 }
 
-async function callClaude(sys,usr,mid,mt,opts) {
-  var o=opts||{};
-  if (_cancelled) throw new Error("Migration cancelled");
-  var maxRetries=o.retries!==undefined?o.retries:0;
-  var timeout=o.timeout||60000; // 60s default — no call should hang
-  for (var attempt=0;attempt<=maxRetries;attempt++) {
-    if (_cancelled) throw new Error("Migration cancelled");
-    var controller=new AbortController();
-    _activeController=controller; // expose so cancel button can abort
-    var timer=setTimeout(function(){controller.abort()},timeout);
-    try {
-      var r = await fetch("/api/migrate",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||4000,system:sys,messages:[{role:"user",content:usr}]}),
-        signal:controller.signal
-      });
-      clearTimeout(timer);
-      _activeController=null;
-      if (_cancelled) throw new Error("Migration cancelled");
-      if (r.status===529||r.status===503) { if(attempt<maxRetries){await new Promise(function(ok){setTimeout(ok,2000)});continue;} throw new Error("API overloaded ("+r.status+")"); }
-      if (!r.ok) throw new Error("API "+r.status);
-      var d = await r.json();
-      if (d.usage) { _tks.i+=(d.usage.input_tokens||0); _tks.o+=(d.usage.output_tokens||0); _tks.calls++; _tks.last={i:d.usage.input_tokens||0,o:d.usage.output_tokens||0}; }
-      return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");
-    } catch(e) {
-      clearTimeout(timer);
-      _activeController=null;
-      if (_cancelled) throw new Error("Migration cancelled");
-      if (e.name==="AbortError") {
-        if (attempt<maxRetries) continue;
-        throw new Error("Timeout after "+Math.round(timeout/1000)+"s");
-      }
-      if (attempt<maxRetries) continue;
-      throw e;
-    }
-  }
-  throw new Error("Max retries exceeded");
-}
+// callClaude extracted to ./services/claudeClient.js
 
-
-// ═══ QA SANDBOX TESTING SYSTEM (v4.5) ═══
-// Generates test cases via Claude, translates functions to JS, executes in browser sandbox
-
-async function generateTestSuite(files, lang, ver, mid) {
-  var ln=(LANGS[lang]||{}).n||lang;
-  var manifest=files.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-
-  // Language-specific hints for better JS translations
-  var langHints="";
-  if(lang==="python") langHints="\nPython-specific: dict→object literal, list→array, tuple→array, None→null, True/False→true/false, string slicing→.slice(), enumerate→.forEach with index, list comprehension→.map/.filter, range()→Array.from({length:n},(_,i)=>i), isinstance→typeof/instanceof, **kwargs→object destructuring.";
-  else if(lang==="java") langHints="\nJava-specific: ArrayList→array, HashMap→object literal, .get()→[key], .put()→[key]=val, .size()→.length, Optional→nullable, Stream→array methods (.map/.filter/.reduce), StringBuilder→string concat, Collections.sort→.sort(), System.out.println→console.log, static methods→regular functions.";
-  else if(lang==="kotlin") langHints="\nKotlin-specific: listOf→array, mutableListOf→array, mapOf→object, data class→object literal, when→switch/if-else, ?.let{}→if(x!=null), ?:→||, companion object→static, suspend fun→async function, Flow→async generator or callback, sealed class→union types with type field.";
-  else if(lang==="csharp") langHints="\nC#-specific: List<T>→array, Dictionary→object, LINQ .Where→.filter, .Select→.map, .FirstOrDefault→.find, string.Format→template literal, DateTime→new Date(), StringBuilder→string concat, ConfigurationManager→object literal mock, async Task→async function, IDisposable→try-finally.";
-  else if(lang==="typescript") langHints="\nTypeScript-specific: interfaces→plain objects, generic types→dynamic, enum→object with const values, type narrowing→typeof checks, optional chaining ?. → same in JS, nullish coalescing ?? → same in JS.";
-
-  var sys="You are a Senior QA Engineer. Analyze this "+ln+" "+ver+" codebase and generate a comprehensive test suite.\n\nFor EACH testable function/method in the codebase:\n1) Identify the function name, file, and what it does\n2) Design 3-5 test cases with concrete inputs and expected outputs\n3) Cover: happy path, edge cases (empty/null/zero/empty string), error cases, boundary values\n4) Classify each test: unit | integration | api\n5) CRITICAL: Write a JavaScript equivalent of EACH function that preserves the EXACT same logic."+langHints+"\n\nIMPORTANT RULES for JS translations:\n- Functions must be pure and self-contained (no external imports, no require, no DOM)\n- Use standard JS only — must work with new Function()\n- Wrap everything so it returns the function: 'return function(arg1, arg2){...}'\n- For classes with multiple methods: 'return function(methodName, ...args){ var state={...}; if(methodName===\"x\") return ...; }'\n- Mock ALL external calls with predictable returns:\n  * DB queries: return [{id:1,name:\"test\"}] \n  * HTTP GET: return {status:200,data:[{id:1}]}\n  * HTTP POST: return {status:201,id:\"new-1\"}\n  * Filesystem read: return \"mock file content\"\n  * Console/logging: no-op (return undefined)\n  * Current date/time: return fixed \"2024-01-15T10:00:00Z\"\n- Handle null/undefined gracefully — don't crash on bad input\n- For array/object returns, the JS output must be JSON-serializable\n\nRespond ONLY valid JSON:\n{\"tests\":[{\"id\":\"t1\",\"name\":\"descriptive test name\",\"file\":\"filename\",\"function\":\"functionName\",\"type\":\"unit|integration|api\",\"jsFunction\":\"return function(input){ ... }\",\"cases\":[{\"input\":\"JSON-serializable input\",\"expected\":\"JSON-serializable expected output\",\"label\":\"what this tests\"}]}],\"summary\":{\"totalTests\":0,\"totalCases\":0,\"coverage\":{\"files\":0,\"functions\":0},\"types\":{\"unit\":0,\"integration\":0,\"api\":0}}}";
-
-  var usr="Analyze this "+ln+" "+ver+" codebase and generate a test suite with executable JS translations:\n\n"+manifest+"\n\nGenerate 3-5 test cases per function. JS translations MUST be executable with new Function(). Include edge cases (null, empty, zero). JSON only.";
-
-  try {
-    var txt=await callClaude(sys,usr,mid,8000,{timeout:75000});
-    var parsed=safeParseJSON(txt);
-    if(!parsed||!parsed.tests)throw new Error("Invalid test suite JSON");
-    return {ok:true,suite:parsed};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-function executeSandbox(jsCode, testCases) {
-  // Execute a JS function translation against test cases in a safe sandbox
-  var results=[];
-  var fn=null;
-  var MAX_TEST_MS=3000; // 3s max per test case — prevents infinite loops
-
-  // Compile the function
-  try {
-    // Wrap in strict mode for safer execution
-    fn=new Function('"use strict";\n'+jsCode)();
-    if(typeof fn!=="function") throw new Error("JS translation did not return a function");
-  } catch(compileErr) {
-    testCases.forEach(function(tc){
-      results.push({input:tc.input,expected:tc.expected,actual:null,pass:false,skipped:true,error:"Compile: "+compileErr.message,label:tc.label,timeMs:0});
-    });
-    return results;
-  }
-
-  // Execute each test case with timeout protection
-  testCases.forEach(function(tc) {
-    var startMs=performance.now();
-    try {
-      // Parse input safely
-      var input;
-      try { input=typeof tc.input==="string"?JSON.parse(tc.input):tc.input; }
-      catch(parseErr) { input=tc.input; }
-
-      // Execute with implicit timeout check (can't truly timeout sync JS, but we track time)
-      var actual=Array.isArray(input)?fn.apply(null,input):fn(input);
-      var elapsed=Math.round((performance.now()-startMs)*100)/100;
-
-      // If it took too long, flag it
-      if(elapsed>MAX_TEST_MS) {
-        results.push({input:tc.input,expected:tc.expected,actual:actual,pass:false,skipped:false,error:"Slow: "+elapsed+"ms (limit "+MAX_TEST_MS+"ms)",label:tc.label,timeMs:elapsed});
-        return;
-      }
-
-      // Parse expected safely
-      var expected;
-      try { expected=typeof tc.expected==="string"?JSON.parse(tc.expected):tc.expected; }
-      catch(parseErr) { expected=tc.expected; }
-
-      // Deep compare with tolerance for floating point
-      var actualStr=JSON.stringify(actual);
-      var expectedStr=JSON.stringify(expected);
-      var pass=actualStr===expectedStr;
-
-      // Fuzzy match for numbers with floating point tolerance
-      if(!pass&&typeof actual==="number"&&typeof expected==="number") {
-        pass=Math.abs(actual-expected)<0.0001;
-      }
-
-      // Fuzzy match for strings (trim whitespace)
-      if(!pass&&typeof actual==="string"&&typeof expected==="string") {
-        pass=actual.trim()===expected.trim();
-      }
-
-      results.push({input:tc.input,expected:tc.expected,actual:actual,actualStr:actualStr,expectedStr:expectedStr,pass:pass,skipped:false,error:null,label:tc.label,timeMs:elapsed});
-    } catch(runErr) {
-      var elapsed2=Math.round((performance.now()-startMs)*100)/100;
-      results.push({input:tc.input,expected:tc.expected,actual:null,pass:false,skipped:false,error:runErr.message,label:tc.label,timeMs:elapsed2});
-    }
-  });
-  return results;
-}
-
-function runTestSuite(suite) {
-  // Run all tests in the suite and return structured results
-  if(!suite||!suite.tests)return {tests:[],summary:{passed:0,failed:0,skipped:0,total:0,timeMs:0}};
-
-  var allResults=[];
-  var totalTime=0;
-  var passed=0,failed=0,skipped=0;
-
-  suite.tests.forEach(function(test) {
-    var caseResults=executeSandbox(test.jsFunction,test.cases||[]);
-    var testPassed=caseResults.every(function(r){return r.pass||r.skipped});
-    var testSkipped=caseResults.every(function(r){return r.skipped});
-    var testTime=caseResults.reduce(function(s,r){return s+r.timeMs},0);
-    totalTime+=testTime;
-
-    caseResults.forEach(function(r){
-      if(r.skipped)skipped++;
-      else if(r.pass)passed++;
-      else failed++;
-    });
-
-    allResults.push({
-      id:test.id,
-      name:test.name,
-      file:test.file,
-      func:test.function,
-      type:test.type,
-      passed:testPassed,
-      skipped:testSkipped,
-      cases:caseResults,
-      timeMs:Math.round(testTime*100)/100
-    });
-  });
-
-  return {
-    tests:allResults,
-    summary:{passed:passed,failed:failed,skipped:skipped,total:passed+failed+skipped,timeMs:Math.round(totalTime*100)/100},
-    timestamp:new Date().toISOString()
-  };
-}
-
-async function generateAndRunQA(files, lang, ver, mid, phase, existingSuite) {
-  // phase: "pre" or "post"
-  // If pre: generate suite + run. If post: reuse existing suite + run on migrated code
-  var suite=existingSuite;
-  if(!suite) {
-    var genResult=await generateTestSuite(files,lang,ver,mid);
-    if(!genResult.ok) return {ok:false,error:genResult.error};
-    suite=genResult.suite;
-  }
-  var results=runTestSuite(suite);
-  return {ok:true,suite:suite,results:results,phase:phase};
-}
+// generateTestSuite, executeSandbox, runTestSuite, generateAndRunQA extracted to ./services/qaSandbox.js
 
 
 async function runVirtualQA(files, lang, ver, mid, phase) {
@@ -2337,531 +550,11 @@ function exportTestsAsCode(suite, lang, targetLang) {
   return code;
 }
 
-// ═══ PHASE A: Codebase Analysis — understand the app before touching anything ═══
-async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-  var manifest=files.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  
-  var crossBlock="";
-  if (isCross) {
-    var tgtMod=MODULE_CONVENTIONS[tl]||{};
-    crossBlock="\n\nCROSS-LANGUAGE ("+sn+"→"+tn+"): Output uses "+tgtMod.system+", "+tgtMod.naming+". Include 'fileMapping' mapping each source file to its target name/extension.";
-  }
-  
-  var fileMappingSchema=isCross?",\"fileMapping\":[{\"source\":\"original.py\",\"target\":\"original.js\",\"targetPath\":\"path/original.js\",\"notes\":\"module system changes\"}]":"";
-  
-  var sys="You are a Principal Architect performing pre-migration analysis. Analyze this "+sn+" "+sv+" codebase that will be migrated to "+tn+" "+tv+". Map the ENTIRE system before any code is changed."+crossBlock+"\n\nFor EACH file, provide DETAILED migration notes:\n- List EVERY deprecated API call with its exact modern replacement\n- List EVERY import that needs to change and what it changes to\n- Identify async patterns (callbacks, promises, sync I/O) and the target async model\n- Note error handling patterns and how they map to "+tn+"\n- Identify class/function signatures that will change\n- Flag data structures that cross file boundaries\n\nCRITICAL: For each file, count processing signals in 'processingHints'. These DIRECTLY control the AI processing budget:\n- deprecatedAPIs: count of deprecated/legacy API calls that need replacement\n- asyncChanges: count of async pattern migrations (callbacks→promises, sync→async, etc.)\n- importChanges: count of import/require statements that need to change\n- structuralChanges: count of class/interface/inheritance changes\n- typeChanges: count of type system changes (adding types, changing generics, etc.)\n- errorHandling: count of try/catch/exception pattern changes\n- totalSignals: sum of all above — this determines how much processing power each file gets\n\nBe ACCURATE with counts — overcounting wastes resources, undercounting produces incomplete migrations.\n\nRespond ONLY valid JSON:\n{\"purpose\":\"what this app/service does\",\"architecture\":\"pattern (MVC/layered/microservice/etc)\",\"files\":[{\"name\":\"...\",\"role\":\"what this file does\",\"exports\":[\"public APIs/classes/functions\"],\"imports\":[\"what it depends on\"],\"migrationNotes\":\"DETAILED: every API change, every pattern shift, every import change\",\"complexity\":\"simple|moderate|complex\",\"estimatedChanges\":0,\"processingHints\":{\"deprecatedAPIs\":0,\"asyncChanges\":0,\"importChanges\":0,\"structuralChanges\":0,\"typeChanges\":0,\"errorHandling\":0,\"totalSignals\":0}}],\"dependencies\":[{\"from\":\"file\",\"to\":\"file\",\"type\":\"import|call|inherit|config\",\"detail\":\"...\"}],\"criticalPaths\":[\"sequence of calls that must work together\"],\"risks\":[{\"area\":\"...\",\"detail\":\"...\",\"severity\":\"high|medium|low\"}],\"migrationOrder\":[\"files in optimal migration order\"],\"sharedContracts\":[\"interfaces/types/schemas that span multiple files\"]"+fileMappingSchema+"}";
-  var usr="Analyze this "+sn+" "+sv+" codebase ("+files.length+" files, "+files.reduce(function(s,f){return s+f.content.split("\n").length},0)+" total lines):\n\n"+manifest+"\n\nProvide DETAILED per-file migration notes. Each file's migrationNotes should be 3-5 sentences covering every API change, import change, and pattern migration needed.";
-  try {
-    var txt=await callClaude(sys,usr,mid,4000,{timeout:60000});
-    var cl=safeParseJSON(txt);
-    if(!cl)throw new Error("Invalid JSON response");
-    return {ok:true,analysis:cl,isCross:isCross};
-  } catch(e) { return {ok:false,error:e.message,isCross:isCross}; }
-}
-
-// ═══ PHASE B: Per-file Migration with codebase + already-migrated context ═══
-// ═══ PHASE B (pre-step): Per-file migration plan — deep analysis of ONE file ═══
-async function doFilePlan(code,fn,sl,sv,tl,tv,mid,cbCtx,alreadyMigrated,targetFileName,cap) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-  var lineCount=code.split("\n").length;
-
-  // Context from codebase analysis
-  var archCtx="";
-  if (cbCtx&&cbCtx.ok) {
-    var a=cbCtx.analysis;
-    var fileInfo=(a.files||[]).find(function(f){return fn.indexOf(f.name)>=0});
-    archCtx="\nApplication: "+a.purpose+". Architecture: "+a.architecture+".";
-    if (fileInfo) archCtx+="\nFile role: "+fileInfo.role+". High-level notes: "+fileInfo.migrationNotes;
-    if (a.sharedContracts&&a.sharedContracts.length) archCtx+="\nShared contracts: "+a.sharedContracts.join("; ");
-  }
-
-  // Paradigm context for cross-language — inject MORE mappings for complex files
-  var paradigmCtx="";
-  if (isCross) {
-    var pMap=getParadigmMap(sl,tl);
-    if (pMap) {
-      var mapSlice=cap?cap.paradigmSlice:10;
-      paradigmCtx="\n\nParadigm mappings ("+pMap.title+"):";
-      paradigmCtx+="\nStdlib: "+pMap.stdlib.slice(0,mapSlice).join("; ");
-      paradigmCtx+="\nPatterns: "+pMap.patterns.slice(0,mapSlice).join("; ");
-      paradigmCtx+="\nModule system: "+pMap.modules.join("; ");
-      if (pMap.async) paradigmCtx+="\nAsync: "+pMap.async.slice(0,Math.min(mapSlice,8)).join("; ");
-      if (pMap.versionNotes) paradigmCtx+="\nVersion notes: "+pMap.versionNotes.slice(0,6).join("; ");
-    }
-  }
-
-  // Already migrated sibling exports (brief)
-  var siblingCtx="";
-  if (alreadyMigrated&&alreadyMigrated.length) {
-    siblingCtx="\n\nAlready migrated siblings:\n"+alreadyMigrated.map(function(m){
-      var exports=(m.migrated.match(/^export\s+.*/gm)||m.migrated.match(/^(?:public|module\.exports).*/gm)||[]).slice(0,5);
-      return "- "+(m.targetName||m.name)+": "+exports.join("; ");
-    }).join("\n");
-  }
-
-  var sys="You are a migration planner. Analyze this ONE "+sn+" "+sv+" file ("+lineCount+" lines) and produce a CONCRETE migration recipe for "+tn+" "+tv+". Do NOT write any code — only the plan."+archCtx+paradigmCtx+siblingCtx+"\n\nFor EACH section of the file, list:\n1) Line ranges and what they do\n2) EXACT changes needed (old API call → new API call, old pattern → new pattern)\n3) Import changes (what to remove, what to add)\n4) Async model changes (callbacks → promises → async/await)\n5) Error handling changes\n6) Data structure changes\n7) Any cross-file dependency considerations\n\nBe SPECIFIC: 'line 5: urllib2.urlopen(url) → const resp = await fetch(url)' not 'update HTTP calls'\n\nRespond ONLY JSON:\n{\"complexity\":\"simple|moderate|complex\",\"totalChanges\":0,\"sections\":[{\"lines\":\"1-10\",\"purpose\":\"imports\",\"changes\":[\"specific change 1\",\"specific change 2\"]},{\"lines\":\"12-25\",\"purpose\":\"class definition\",\"changes\":[\"...\"]}],\"importPlan\":{\"remove\":[\"old imports\"],\"add\":[\"new imports\"]},\"asyncPlan\":\"description of async model migration\",\"riskAreas\":[\"specific risks\"],\"estimatedOutputLines\":0}";
-
-  var usr="Plan the migration of this "+sn+" "+sv+" file to "+tn+" "+tv+":\n\nFile: "+fn+(targetFileName?" → "+targetFileName:"")+"\n```\n"+code+"\n```\n\nProduce a line-by-line migration recipe. Be specific — exact API replacements, exact import changes. JSON only.";
-
-  try {
-    // Use capacity-driven tokens/timeout, fallback to line-based
-    var planTk=cap?cap.planTokens:Math.min(3000,Math.max(1500,lineCount*30));
-    var planTo=cap?cap.planTimeout:45000;
-    var txt=await callClaude(sys,usr,mid,planTk,{timeout:planTo,retries:0});
-    var parsed=safeParseJSON(txt);
-    if(!parsed)throw new Error("Invalid JSON response");
-    return {ok:true,plan:parsed};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-async function doMigrate(code,fn,sl,sv,tl,tv,mid,pr,cbCtx,alreadyMigrated,targetFileName,allFileMap,filePlan,cap) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-
-  // Build context from codebase analysis — RICH context for better first-pass quality
-  var ctxBlock="";
-  var fileComplexity="moderate";
-  if (cbCtx&&cbCtx.ok) {
-    var a=cbCtx.analysis;
-    var fileInfo=(a.files||[]).find(function(f){return fn.indexOf(f.name)>=0});
-    ctxBlock="\n\n=== CODEBASE CONTEXT ===\nApplication: "+a.purpose+"\nArchitecture: "+a.architecture;
-    if (fileInfo) {
-      ctxBlock+="\nThis file's role: "+fileInfo.role;
-      ctxBlock+="\nExports: "+(fileInfo.exports||[]).join(", ");
-      ctxBlock+="\nDependencies: "+(fileInfo.imports||[]).join(", ");
-      fileComplexity=fileInfo.complexity||"moderate";
-    }
-    if (a.sharedContracts&&a.sharedContracts.length) ctxBlock+="\nShared contracts to preserve: "+a.sharedContracts.join("; ");
-    var deps=(a.dependencies||[]).filter(function(d){return fn.indexOf(d.from)>=0||fn.indexOf(d.to)>=0});
-    if (deps.length) ctxBlock+="\nDependency connections: "+deps.map(function(d){return d.from+" depends on "+d.to+" ("+d.type+": "+d.detail+")"}).join("; ");
-    if (a.criticalPaths&&a.criticalPaths.length) {
-      var relevantPaths=a.criticalPaths.filter(function(cp){return cp.indexOf(fn.replace(/\.[^.]+$/,""))>=0});
-      if (relevantPaths.length) ctxBlock+="\nCritical paths involving this file: "+relevantPaths.join("; ");
-    }
-    ctxBlock+="\n=== END CONTEXT ===";
-  }
-
-  // Inject per-file migration plan (from doFilePlan) — this is the KEY quality driver
-  var planBlock="";
-  if (filePlan&&filePlan.ok&&filePlan.plan) {
-    var fp=filePlan.plan;
-    fileComplexity=fp.complexity||fileComplexity;
-    planBlock="\n\n=== MIGRATION RECIPE FOR THIS FILE ("+fp.totalChanges+" changes planned) ===";
-    if (fp.importPlan) {
-      planBlock+="\nIMPORTS: Remove: "+(fp.importPlan.remove||[]).join(", ")+". Add: "+(fp.importPlan.add||[]).join(", ");
-    }
-    if (fp.asyncPlan) planBlock+="\nASYNC MODEL: "+fp.asyncPlan;
-    if (fp.sections&&fp.sections.length) {
-      planBlock+="\n\nSECTION-BY-SECTION PLAN:";
-      fp.sections.forEach(function(sec){
-        planBlock+="\n[Lines "+sec.lines+" — "+sec.purpose+"]:";
-        (sec.changes||[]).forEach(function(ch){planBlock+="\n  • "+ch});
-      });
-    }
-    if (fp.riskAreas&&fp.riskAreas.length) planBlock+="\n\nRISK AREAS: "+fp.riskAreas.join("; ");
-    planBlock+="\n=== END RECIPE ===";
-    planBlock+="\n\nEXECUTE THIS RECIPE PRECISELY. Apply EVERY change listed above. Do not skip any section.";
-  }
-
-  // Cross-language: add file mapping, module system, AND paradigm mapping instructions
-  var crossBlock="";
-  if (isCross&&allFileMap) {
-    var tgtMod=MODULE_CONVENTIONS[tl]||{};
-    crossBlock="\n\nCROSS-LANGUAGE: Output file: "+targetFileName+". Files: "+allFileMap.map(function(m){return m.source+"→"+m.target}).join(", ")+". Use "+tn+" module system ("+tgtMod.system+"). Imports MUST use "+TARGET_EXT[tl]+" filenames.";
-    // Add concrete paradigm mapping — scale depth by capacity profile
-    var pMap=getParadigmMap(sl,tl);
-    if (pMap) {
-      var mapDepth=cap?cap.paradigmSlice:12;
-      if (cap&&cap.tier>=3) mapDepth=999; // complex: inject ALL mappings
-      crossBlock+="\n\n=== PARADIGM MAPPING ("+pMap.title+") ===";
-      crossBlock+="\nSTDLIB TRANSLATIONS:\n"+pMap.stdlib.slice(0,mapDepth).map(function(s){return "\u2022 "+s}).join("\n");
-      crossBlock+="\nPATTERN TRANSLATIONS:\n"+pMap.patterns.slice(0,mapDepth).map(function(s){return "\u2022 "+s}).join("\n");
-      crossBlock+="\nMODULE SYSTEM:\n"+pMap.modules.map(function(s){return "\u2022 "+s}).join("\n");
-      if (pMap.async) crossBlock+="\nASYNC MODEL:\n"+pMap.async.map(function(s){return "\u2022 "+s}).join("\n");
-      if (pMap.types) crossBlock+="\nTYPE SYSTEM:\n"+pMap.types.map(function(s){return "\u2022 "+s}).join("\n");
-      if (pMap.versionNotes) crossBlock+="\nVERSION-SPECIFIC ("+tv+"):\n"+pMap.versionNotes.map(function(s){return "\u2022 "+s}).join("\n");
-      crossBlock+="\n=== END PARADIGM MAPPING ===";
-      crossBlock+="\n\nAPPLY THESE MAPPINGS CONCRETELY. Do NOT leave any "+sn+" patterns \u2014 translate EVERYTHING to idiomatic "+tn+" "+tv+".";
-    }
-  }
-
-  // Pass already-migrated sibling files — use TARGET filenames in cross-language
-  var siblingBlock="";
-  if (alreadyMigrated&&alreadyMigrated.length) {
-    var summaries=alreadyMigrated.map(function(m){
-      var code=m.migrated;
-      var lines=code.split("\n");
-      var keyLines=[];
-      lines.forEach(function(ln){
-        var t=ln.trim();
-        if (!t||t.startsWith("//")||t.startsWith("#")||t.startsWith("*")) return;
-        if (/^(import |from |require|using |package )/.test(t)) { keyLines.push(ln); return; }
-        if (/^(export |module\.exports|exports\.)/.test(t)) { keyLines.push(ln); return; }
-        if (/^(public |private |protected |class |def |function |async |const |let |var |interface |enum |record |sealed )/.test(t)) {
-          keyLines.push(ln);
-        }
-      });
-      var displayName=m.targetName||m.name;
-      return "### "+displayName+" [ALREADY MIGRATED — key signatures]\n```\n"+keyLines.join("\n")+"\n```";
-    });
-    siblingBlock="\n\n=== ALREADY MIGRATED FILES — match these exports/signatures ===\n"+summaries.join("\n\n")+"\n=== END ===\n\nYour imports and calls MUST match the actual function/class names above."+(isCross?" Reference files by their TARGET names ("+TARGET_EXT[tl]+" extensions).":"");
-  }
-
-  var sys=pr.mig.sys.replace("{TARGET}",tn).replace("{TARGET_VER}",tv).replace("{SOURCE}",sn).replace("{SOURCE_VER}",sv);
-  if (pr.mig.guide.length) sys+="\n\nGuidelines:\n"+pr.mig.guide.map(function(g){return "- "+g.replace(/\{TARGET\}/g,tn).replace(/\{TARGET_VER\}/g,tv).replace(/\{SOURCE\}/g,sn).replace(/\{SOURCE_VER\}/g,sv)}).join("\n");
-  if (isCross) {
-    sys+="\n\nCRITICAL CROSS-LANGUAGE RULES:\n- Output MUST be valid, runnable "+tn+" "+tv+" code\n- Translate EVERY construct — do not leave ANY "+sn+" syntax\n- Use "+tn+" standard library equivalents for ALL "+sn+" stdlib calls\n- Module system: use "+tn+" imports/exports (not "+sn+"'s)\n- Naming: follow "+tn+" conventions ("+((MODULE_CONVENTIONS[tl]||{}).naming||"target conventions")+")\n- Error handling: use "+tn+" try/catch patterns\n- The output must be a COMPLETE, self-contained "+tn+" file that could run as-is";
-  }
-  var usr="Migrate "+sn+" "+sv+" to "+tn+" "+tv+".\nSource file: "+fn+(targetFileName&&targetFileName!==fn?" Target file: "+targetFileName:"")+ctxBlock+planBlock+crossBlock+siblingBlock+"\n\nSOURCE:\n"+code;
-  try {
-    // Scale tokens by file complexity: larger/more complex files need more output space
-    var lineCount=code.split("\n").length;
-    // Token/timeout from adaptive capacity (or fallback)
-    var maxMigTokens=cap?cap.migTokens:Math.min(8192,Math.round((isCross?5120:4096)*1.2));
-    var migTimeout=cap?cap.migTimeout:60000;
-    var txt=await callClaude(sys,usr,mid,maxMigTokens,{timeout:migTimeout});
-    var m=txt.replace(/^```[\w]*\n?/gm,"").replace(/\n?```$/gm,"").trim();
-    var ch=(m.match(/(?:\/\/|#)\s*MIGRATED:.*/g)||[]).map(function(c){return c.replace(/(?:\/\/|#)\s*MIGRATED:\s*/,"").trim()});
-    if (!ch.length) ch.push(sn+" "+sv+" → "+tn+" "+tv);
-    return {migrated:m,changes:ch,engine:"claude-ai"};
-  } catch(e) {
-    return {migrated:"// Error: "+e.message+"\n\n"+code,changes:["Error: "+e.message],engine:"fallback"};
-  }
-}
-
-// ═══ PHASE B2a: Dependency Audit — map every cross-file connection before touching code ═══
-async function doDependencyAudit(origFiles,migratedResults,sl,sv,tl,tv,mid) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-
-  var crossCtx="";
-  if (isCross) {
-    crossCtx="\n\nCROSS-LANGUAGE ("+sn+" to "+tn+"): "+migratedResults.map(function(r){return r.name+" renamed to "+(r.targetName||r.name)}).join(", ")+".";
-    var pMap=getParadigmMap(sl,tl);
-    if (pMap) {
-      crossCtx+="\nExpected module system: "+pMap.modules.join("; ");
-    }
-  }
-
-  var sys="You are a dependency auditor. Analyze "+migratedResults.length+" migrated files ("+tn+" "+tv+") and map EVERY cross-file connection."+crossCtx+"\n\nFor each file, extract:\n1) What it EXPORTS (functions, classes, constants, default export)\n2) What it IMPORTS (from which file, what names)\n3) Function signatures at boundaries (params, return types)\n4) Shared data structures / contracts\n\nThen verify:\n- Every import resolves to a real export in a sibling file\n- Function call signatures match the definition\n- Data types are compatible at boundaries\n- Module system is consistent (all ESM or all CommonJS)\n- Naming conventions are consistent\n\nRespond ONLY JSON:\n{\"files\":[{\"name\":\"...\",\"exports\":[{\"name\":\"...\",\"type\":\"function|class|const|default\",\"signature\":\"params and return\"}],\"imports\":[{\"from\":\"...\",\"names\":[\"...\"],\"resolved\":true/false}]}],\"connections\":[{\"from\":\"file\",\"to\":\"file\",\"type\":\"imports|calls|extends\",\"fromSignature\":\"...\",\"toSignature\":\"...\",\"compatible\":true/false,\"issue\":\"description if incompatible\"}],\"issues\":[{\"files\":[\"...\"],\"type\":\"unresolved_import|signature_mismatch|missing_export|inconsistent_module|naming\",\"detail\":\"...\",\"fix\":\"suggested fix\"}],\"moduleSystem\":\"ESM|CommonJS|mixed\",\"summary\":\"2-3 sentences\"}";
-
-  var usr="MIGRATED CODEBASE ("+tn+" "+tv+") — "+migratedResults.length+" files migrated independently:\n\n"+migManifest+"\n\nMap ALL cross-file connections. Find every unresolved import, signature mismatch, and naming inconsistency. JSON only.";
-
-  try {
-    var txt=await callClaude(sys,usr,mid,3000,{timeout:60000});
-    var parsed=safeParseJSON(txt);
-    if(!parsed)throw new Error("Invalid JSON response");
-    return {ok:true,audit:parsed};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-// ═══ PHASE B2b: Consolidation Fix — use audit results to fix all cross-file issues ═══
-async function doConsolidation(origFiles,migratedResults,sl,sv,tl,tv,mid,depAudit) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-
-  var crossInstr="";
-  if (isCross) {
-    crossInstr="\nCROSS-LANGUAGE: "+migratedResults.map(function(r){return r.name+" to "+(r.targetName||r.name)}).join(", ")+". Use "+TARGET_EXT[tl]+" filenames as JSON keys.";
-    var pMap=getParadigmMap(sl,tl);
-    if (pMap) {
-      crossInstr+="\nModule system: "+pMap.modules.join("; ");
-      crossInstr+="\nAsync model: "+pMap.async.join("; ");
-    }
-  }
-
-  // Build audit context if available
-  var auditCtx="";
-  if (depAudit&&depAudit.ok&&depAudit.audit) {
-    var a=depAudit.audit;
-    if (a.issues&&a.issues.length) {
-      auditCtx="\n\n=== DEPENDENCY AUDIT RESULTS ("+a.issues.length+" issues found) ===\n";
-      auditCtx+=a.issues.map(function(is,i){return (i+1)+". ["+is.type+"] "+((is.files||[]).join(","))+": "+is.detail+(is.fix?" → FIX: "+is.fix:"")}).join("\n");
-      auditCtx+="\n=== END AUDIT ===";
-    }
-    if (a.connections&&a.connections.length) {
-      var broken=a.connections.filter(function(c){return !c.compatible});
-      if (broken.length) {
-        auditCtx+="\n\nBROKEN CONNECTIONS:\n"+broken.map(function(c){return c.from+" calls "+c.to+": "+c.fromSignature+" vs "+c.toSignature+" — "+c.issue}).join("\n");
-      }
-    }
-    if (a.moduleSystem==="mixed") {
-      auditCtx+="\n\nWARNING: Mixed module system detected. Standardize to "+tn+" default.";
-    }
-  }
-
-  var sys="Consolidation engineer: "+migratedResults.length+" files migrated independently "+sn+" "+sv+" to "+tn+" "+tv+"."+crossInstr+auditCtx+"\n\nFix ALL cross-file issues found by the dependency audit:\n1) Resolve every unresolved import — match exact export names\n2) Fix signature mismatches at call boundaries\n3) Standardize module system (all ESM or all CommonJS for "+tn+")\n4) Ensure consistent naming conventions\n5) Fix data type compatibility at boundaries\n6) Ensure consistent async model (no mixing callbacks with promises)\n\nReturn ALL files (unchanged ones copied as-is). Return COMPLETE file contents.\n\nReturn JSON: {\"files\":{\"filename\":\"full source code\",...},\"fixes\":[\"description of each fix\"]}";
-
-  var usr="ORIGINAL ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED INDEPENDENTLY ("+tn+" "+tv+"):\n"+migManifest+"\n\nFix ALL cross-file issues"+(auditCtx?" identified in the audit":"")+" . Return ALL "+migratedResults.length+" files with complete source code. JSON only.";
-
-  try {
-    var txt=await callClaude(sys,usr,mid,10000,{timeout:75000});
-    var parsed=safeParseJSON(txt);
-    if(!parsed)throw new Error("Invalid JSON response");
-    return {ok:true,files:parsed.files||{},fixes:parsed.fixes||[]};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-// ═══ Unified scoring rubric (shared across all evaluators) ═══
-var SCORING_RUBRIC="MANDATORY SCORING PROTOCOL:\n1) Score EACH of the 8 layers independently 0-100\n2) Final score = WEIGHTED AVERAGE: imports×10 + architecture×15 + async×15 + security×20 + errors×10 + types×10 + dataflow×10 + idiomatic×10, divided by 100\n3) Show math: (layer1×weight + layer2×weight + ...) / 100 = final\n\nLAYER SCORING GUIDE — be honest, not generous OR harsh:\n- 90-100: Excellent. Production-ready. Zero critical issues, minor style issues at most.\n- 75-89: Good. Functional with some quality gaps (incomplete validation, some legacy patterns).\n- 55-74: Acceptable. Works but real problems exist (security gaps, mixed paradigms, weak error handling).\n- 30-54: Poor. Significant issues but code structure is recognizable and partially functional.\n- 10-29: Broken. Syntax errors, unresolved imports, fundamentally non-functional.\n- 0-9: Empty or completely unrelated code.\n\nCALIBRATION: Even a naive literal translation that compiles should score 30-50. A decent automated migration typically scores 60-80. 90+ requires genuinely excellent, production-quality code.";
-
-// ═══ PHASE C: Integration Validation — comprehensive, regression-aware ═══
-async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,mid,lang,prevContext) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-  var lnames={es:"Español",en:"English",pt:"Português"}; var ln=lnames[lang]||"Español";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;var dp=r.targetPath||r.path||dn;return "### "+dn+(dp?" ("+dp+")":"")+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-
-  var crossBlock="";
-  if (isCross) {
-    var tgtMod=MODULE_CONVENTIONS[tl]||{};
-    crossBlock="\n\nCROSS-LANGUAGE ("+sn+"→"+tn+"): Files renamed: "+migratedResults.map(function(r){return r.name+"→"+(r.targetName||r.name)}).join(", ")+". Imports must use "+TARGET_EXT[tl]+" filenames. Use target names in issue 'files' arrays.";
-  }
-
-  var regressionBlock="";
-  if (prevContext) {
-    regressionBlock="\n\nREGRESSION CHECK: Previously working: "+prevContext.verified.slice(0,5).join("; ")+". Fixed last iteration: "+prevContext.fixedIssues.slice(0,5).join("; ")+". If something previously working broke → severity=critical.";
-  }
-
-  var sys="You are a senior code reviewer evaluating a "+sn+" "+sv+" → "+tn+" "+tv+" migration ("+migratedResults.length+" files). Respond in "+ln+"."+crossBlock+"\n\nBe thorough and fair. Find real issues but also acknowledge what works well.\n\nEvaluate ALL 8 layers INDEPENDENTLY. For each layer, examine every file:\n1) IMPORTS (weight 10%): All imports resolve to real exports? Correct paths and extensions?\n2) ARCHITECTURE (weight 15%): Module structure preserved? Separation of concerns maintained?\n3) ASYNC (weight 15%): Async model fully migrated? No mixed callback+promise patterns?\n4) SECURITY (weight 20%): SQL injection? XSS? Resource leaks? Input validation?\n5) ERRORS (weight 10%): All error paths covered? Proper propagation?\n6) TYPES (weight 10%): Function signatures match across files? Types correct at boundaries?\n7) DATAFLOW (weight 10%): Data transformation preserved? No silent data loss?\n8) IDIOMATIC (weight 10%): Modern "+tv+" patterns used? No legacy "+sv+" holdovers?"+(isCross?"\n\nCROSS-LANGUAGE CALIBRATION: In cross-language migrations, evaluate whether the code was translated to GENUINE "+tn+" idioms. A literal translation that works but uses "+sn+" patterns in "+tn+" syntax should score 50-65 in idiomatic. Code that is genuinely idiomatic "+tn+" scores 80+. Even imperfect cross-language migrations that compile and run correctly should get 40-60 overall.":"")+"\n\n"+SCORING_RUBRIC+regressionBlock+"\n\nScore each layer FIRST with specific justification. Then compute final = weighted average.\n\nRespond ONLY JSON:\n{\"layers\":[{\"name\":\"imports\",\"score\":0-100,\"status\":\"pass|warn|fail\",\"detail\":\"what you found\"},{\"name\":\"architecture\",\"score\":...},...all 8],\"score\":0-100,\"scoreBreakdown\":\"imports:X×10 + architecture:X×15 + ... = N/100 = final\",\"pass\":true/false,\"issues\":[{\"severity\":\"critical|major|moderate|minor\",\"files\":[\"file.ext\"],\"category\":\"imports|architecture|async|security|errors|types|dataflow|idiomatic\",\"msg\":\"specific problem\",\"fix\":\"specific code fix\"}],\"verified\":[\"what works\"],\"summary\":\"2-3 sentences\"}";
-  var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nThorough review. Score each layer independently (0-100), then compute weighted average. Show your math. ALL text in "+ln+". Respond ONLY JSON.";
-  try {
-    // Scale tokens: more files need more detailed layer analysis (8 layers × N files)
-    var intCheckTokens=Math.min(6000,4000+migratedResults.length*400);
-    var txt=await callClaude(sys,usr,mid,intCheckTokens);
-    var parsed=safeParseJSON(txt);
-    if(!parsed)throw new Error("Invalid JSON response");
-    if (parsed.layers&&parsed.layers.length>=6) {
-      var weights={imports:10,architecture:15,async:15,security:20,errors:10,types:10,dataflow:10,idiomatic:10};
-      var wSum=0, wTotal=0;
-      parsed.layers.forEach(function(ly){
-        var key=(ly.name||"").toLowerCase().replace(/[^a-z]/g,"");
-        // Fuzzy match layer names to weight keys
-        var w=weights[key]||0;
-        if(!w){Object.keys(weights).forEach(function(k){if(key.indexOf(k)>=0||k.indexOf(key)>=0)w=weights[k]})}
-        if(!w)w=10; // fallback
-        wSum+=(ly.score||0)*w;
-        wTotal+=w;
-      });
-      var derived=wTotal>0?Math.round(wSum/wTotal):parsed.score;
-      if (Math.abs(derived-(parsed.score||0))>8) {
-        parsed.scoreBreakdown=(parsed.scoreBreakdown||"")+" [Recalculated: model said "+parsed.score+", layers give "+derived+"]";
-        parsed.score=derived;
-      }
-      // Ensure pass reflects the recalculated score
-      parsed.pass=parsed.score>=90&&(parsed.issues||[]).filter(function(is){return is.severity==="critical"||is.severity==="major"}).length===0;
-    }
-    // ═══ SCORING FLOOR: if there's actual migrated code, minimum score is 10 ═══
-    // A score of 0 means "no code at all" — even terrible code with syntax errors gets 10-20
-    if ((parsed.score||0)<10) {
-      var hasCode=migratedResults.some(function(r){return r.migrated&&r.migrated.trim().length>50&&!r.migrated.startsWith("// Error:")});
-      if (hasCode) {
-        parsed.scoreBreakdown=(parsed.scoreBreakdown||"")+" [Floor applied: original="+parsed.score+", migrated code exists → min 10]";
-        parsed.score=Math.max(parsed.score||0,10);
-      }
-    }
-    return {ok:true,result:parsed};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-// ═══ PHASE D: Integration Fix — holistic, escalating strategies ═══
-async function doIntegrationFix(origFiles,migratedResults,issues,sl,sv,tl,tv,mid,iteration,prevIssues) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var isCross=sl!==tl;
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-  // Sort issues by severity for priority fixing
-  var sevOrder={critical:0,major:1,moderate:2,minor:3};
-  var sortedIssues=issues.slice().sort(function(a,b){return (sevOrder[a.severity]||3)-(sevOrder[b.severity]||3)});
-  var issueList=sortedIssues.map(function(is,idx){return (idx+1)+". ["+is.severity.toUpperCase()+"] "+(is.files||[]).join(" ↔ ")+" ("+is.category+"): "+is.msg+(is.fix?"\n   FIX: "+is.fix:"")}).join("\n");
-
-  var crossInstr="";
-  if (isCross) {
-    var tgtMod=MODULE_CONVENTIONS[tl]||{};
-    crossInstr="\n\nCROSS-LANGUAGE CONTEXT:\nFile mapping: "+migratedResults.map(function(r){return r.name+" → "+(r.targetName||r.name)}).join(", ")+"\nTarget module system: "+tgtMod.system+"\nUse TARGET filenames as keys in your response JSON.";
-    var pMap=getParadigmMap(sl,tl);
-    if (pMap) {
-      crossInstr+="\n\nKEY API TRANSLATIONS ("+pMap.title+"):\n"+pMap.stdlib.slice(0,8).map(function(s){return "• "+s}).join("\n");
-      crossInstr+="\n"+pMap.patterns.slice(0,6).map(function(s){return "• "+s}).join("\n");
-    }
-  }
-
-  var escalation="";
-  if (iteration>=2 && prevIssues) {
-    escalation="\n\nESCALATION: Previous fix failed. Try DIFFERENT approach — rewrite affected functions/classes instead of patching. Still broken: "+prevIssues.slice(0,5).map(function(is){return (is.files||[]).join("↔")+": "+is.msg}).join("; ");
-  }
-
-  var fileListStr=migratedResults.map(function(r){return r.targetName||r.name}).join(", ");
-  var sys="Fix ALL "+issues.length+" issues in "+sn+" "+sv+" to "+tn+" "+tv+" migration ("+fileListStr+")."+escalation+crossInstr+"\n\nCRITICAL ANTI-REGRESSION RULES:\n- DO NOT break anything that currently works. Fix issues ONLY — do not rewrite unrelated code.\n- If a file has no issues, return it UNCHANGED (copy it exactly as-is).\n- Preserve ALL existing imports, exports, function signatures unless an issue specifically requires changing them.\n- After fixing, mentally verify: would the fixed code compile? Do all imports still resolve?\n\nPriority: fix critical/major first, then moderate (non-idiomatic code, incomplete async migration, weak typing, missing validation). Return ALL "+migratedResults.length+" files (unchanged files copied as-is). Valid runnable "+tn+" "+tv+" with MODERN idiomatic patterns. "+SCORING_RUBRIC+"\n\nReturn ONLY JSON: {\"files\":{\"filename\":\"full source code\",...},\"fixed\":[\"fix descriptions\"]}";
-
-  var usr="ORIGINAL ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nCURRENT MIGRATED ("+tn+" "+tv+") — has "+issues.length+" issues:\n"+migManifest+"\n\n===\n\nALL ISSUES ("+issues.length+") sorted by severity:\n"+issueList+"\n\nFix ALL issues including moderate quality gaps. Return ALL "+migratedResults.length+" files. JSON only.";
-
-  try {
-    var txt=await callClaude(sys,usr,mid,10000,{timeout:75000});
-    var parsed=safeParseJSON(txt);
-    if(!parsed)throw new Error("Invalid JSON response");
-    var fixedFiles=parsed.files||parsed;
-    var fixed=parsed.fixed||[];
-    return {ok:true,files:fixedFiles,fixed:fixed};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-async function doReview(origFiles,migratedResults,sl,sv,tl,tv,mid,pr,lang) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var lnames={es:"Español",en:"English",pt:"Português"};
-  var ln=lnames[lang]||"Español";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-  var sys="You are a STRICT QA reviewer: "+sn+" "+sv+"→"+tn+" "+tv+" ("+migratedResults.length+" files). Respond in "+ln+".\n\nScore each dimension independently FIRST, then compute weighted average:\n- Functional(25%): Does migrated code produce same outputs for same inputs? Test with empty, null, error cases.\n- Syntax(15%): Valid compilable "+tv+"? All imports resolve? All types correct?\n- Idiomatic(15%): Genuine modern "+tv+" patterns? No legacy "+sv+" holdovers? Proper stdlib usage?\n- Async(10%): Async model fully migrated and consistent? No mixed paradigms?\n- Security(15%): SQL injection, XSS, resource leaks, input validation, hardcoded secrets?\n- Errors(8%): All error paths covered? No swallowed exceptions? Resource cleanup?\n- Contracts(7%): Public API surface preserved? Function signatures compatible for callers?\n- Docs(5%): MIGRATED comments present? Clear naming? Self-documenting code?\n\n"+SCORING_RUBRIC+"\n\nFinal score = weighted average of dimensions. Verdict: aprobado(90+), con_observaciones(70-89), rechazado(<70).\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"func:X×25 + syn:X×15 + idi:X×15 + async:X×10 + sec:X×15 + err:X×8 + con:X×7 + doc:X×5 = N/100\",\"verdict\":\"aprobado|con_observaciones|rechazado\",\"dimensions\":{\"functional\":0-100,\"syntax\":0-100,\"idiomatic\":0-100,\"async\":0-100,\"security\":0-100,\"errors\":0-100,\"contracts\":0-100,\"docs\":0-100},\"errors\":[{\"file\":\"...\",\"line\":0,\"severity\":\"critical|major|minor\",\"dimension\":\"functional|syntax|idiomatic|async|security|errors|contracts|docs\",\"msg\":\"in "+ln+"\"}],\"warnings\":[{\"file\":\"...\",\"line\":0,\"dimension\":\"...\",\"msg\":\"in "+ln+"\"}],\"good\":[\"in "+ln+"\"],\"summary\":\"2-3 sentences in "+ln+"\"}";
-  var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nStrict review. Score each dimension independently. Compute weighted average. Typical migration: 65-80. ALL text in "+ln+". Respond ONLY JSON.";
-  try {
-    var txt=await callClaude(sys,usr,mid,4000);
-    var cl=safeParseJSON(txt);
-    if(!cl)throw new Error("Invalid JSON response");
-    // JS-side recalculation from dimensions
-    if (cl.dimensions) {
-      var dw={functional:25,syntax:15,idiomatic:15,async:10,security:15,errors:8,contracts:7,docs:5};
-      var dSum=0;
-      Object.keys(dw).forEach(function(k){dSum+=((cl.dimensions[k]||0)*dw[k])});
-      var derived=Math.round(dSum/100);
-      if (Math.abs(derived-(cl.score||0))>8) {
-        cl.scoreBreakdown=(cl.scoreBreakdown||"")+" [Recalc: model="+cl.score+", dims="+derived+"]";
-        cl.score=derived;
-      }
-      cl.verdict=cl.score>=90?"aprobado":cl.score>=70?"con_observaciones":"rechazado";
-    }
-    // Scoring floor: valid code never gets 0
-    if ((cl.score||0)<10 && cl.dimensions) {
-      var anyDim=Object.values(cl.dimensions).some(function(v){return v>0});
-      if (anyDim) { cl.score=Math.max(cl.score||0,10); cl.verdict=cl.score>=90?"aprobado":cl.score>=70?"con_observaciones":"rechazado"; }
-    }
-    return {ok:true,review:cl};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-async function doFixPlan(origFiles,migratedResults,review,sl,sv,tl,tv,mid,lang) {
-  var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
-  var lnames={es:"Español",en:"English",pt:"Português"};
-  var ln=lnames[lang]||"Español";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){return "### "+r.name+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
-  var errList=(review.errors||[]).map(function(e){return "["+((e.file||"?"))+"] "+(e.line?"Ln "+e.line+": ":"")+e.msg}).join("\n");
-  var warnList=(review.warnings||[]).map(function(w){return "["+((w.file||"?"))+"] "+w.msg}).join("\n");
-  var sys="Fix "+migratedResults.length+" files: "+sn+" "+sv+"→"+tn+" "+tv+" migration. Respond in "+ln+".\n\nFormat:\n---ACTION_PLAN---\n(numbered steps in "+ln+")\n---CORRECTED_FILES---\nJSON: {\"files\":{\"filename\":\"full source\",...}}\n---CHECKLIST---\n(verification items in "+ln+")";
-  var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nSCORE: "+review.score+"/100\n\nERRORS:\n"+errList+"\n\nWARNINGS:\n"+warnList+"\n\nGenerate fix plan in "+ln+". Return ALL "+migratedResults.length+" files.";
-  try {
-    var txt=await callClaude(sys,usr,mid,10000,{timeout:75000});
-    var plan="",filesJson=null,checklist="";
-    var parts=txt.split(/---(?:ACTION_PLAN|CORRECTED_FILES|CHECKLIST)---/);
-    if (parts.length>=4) {
-      plan=parts[1].trim();
-      var codeBlock=parts[2].replace(/^```json?\n?/gm,"").replace(/\n?```$/gm,"").trim();
-      try { filesJson=JSON.parse(codeBlock); filesJson=filesJson.files||filesJson; } catch(e){ filesJson=null; }
-      checklist=parts[3].trim();
-    } else if (parts.length>=2) {
-      plan=parts[1]?parts[1].trim():"";
-      checklist=parts[3]?parts[3].trim():"";
-    } else { plan=txt; }
-    return {ok:true,plan:plan,files:filesJson,checklist:checklist};
-  } catch(e) { return {ok:false,error:e.message}; }
-}
-
-// Safe JSON parse — returns null instead of throwing
-function safeParseJSON(str) {
-  try { return JSON.parse(str.replace(/^```json?\n?/gm,"").replace(/\n?```$/gm,"").trim()); }
-  catch(e) { return null; }
-}
-
-function mkDiff(a,b) {
-  var ol=a.split("\n"),nl=b.split("\n"),d=[];
-  var oi=0,ni=0;
-  while(oi<ol.length||ni<nl.length) {
-    if (oi<ol.length&&ni<nl.length) {
-      if (ol[oi]===nl[ni]) { d.push({t:"same",o:ol[oi],n:nl[ni],oN:oi+1,nN:ni+1}); oi++; ni++; }
-      else { d.push({t:"mod",o:ol[oi],n:nl[ni],oN:oi+1,nN:ni+1}); oi++; ni++; }
-    } else if (oi<ol.length) { d.push({t:"del",o:ol[oi],n:"",oN:oi+1,nN:null}); oi++; }
-    else { d.push({t:"add",o:"",n:nl[ni],oN:null,nN:ni+1}); ni++; }
-  }
-  return d;
-}
-
-function mkRisks(sl,tl) {
-  var r=[];
-  if (sl!==tl) r.push({lv:"high",cat:"Cross-Language",msg:"Cambios arquitectónicos"});
-  if (sl==="javascript") r.push({lv:"medium",cat:"Async",msg:"Callbacks a async/await"});
-  if (sl==="java") r.push({lv:"medium",cat:"APIs",msg:"APIs legacy"});
-  if (sl==="csharp") r.push({lv:"high",cat:"Framework",msg:"System.Web, ConfigMgr"});
-  if (sl==="python") r.push({lv:"medium",cat:"Sintaxis",msg:"print, urllib2"});
-  return r;
-}
-
-// Minimal syntax highlighting — returns array of {text,color} segments
-function syntaxHL(line,lang) {
-  if (!line) return [{text:"",color:null}];
-  var segs=[],i=0,s=line;
-  // Comment detection
-  var cc=lang==="python"||lang==="ruby"?"#":"//";
-  var ci=s.indexOf(cc);
-  // Skip if inside a string
-  var inStr=false;
-  if (ci>=0) {
-    for(var j=0;j<ci;j++){if(s[j]==="'"||s[j]==='"')inStr=!inStr}
-    if (!inStr) return [{text:s.slice(0,ci),color:null},{text:s.slice(ci),color:"#6a9955"}];
-  }
-  // Keywords per language group
-  var kw;
-  if (lang==="python"||lang==="ruby") kw=/\b(def|class|import|from|return|if|else|elif|for|while|try|except|finally|with|as|in|not|and|or|is|None|True|False|self|yield|async|await|raise|lambda|pass|break|continue|require|do|end|module|begin|rescue|puts|attr_accessor)\b/g;
-  else if (lang==="java"||lang==="kotlin"||lang==="csharp") kw=/\b(public|private|protected|class|interface|enum|extends|implements|return|if|else|for|while|switch|case|break|try|catch|finally|throw|throws|new|import|package|static|final|void|int|String|boolean|double|float|long|var|val|fun|override|abstract|sealed|record|using|namespace|async|await|null|true|false|this|super|readonly|const|get|set)\b/g;
-  else kw=/\b(var|let|const|function|class|return|if|else|for|while|switch|case|break|try|catch|finally|throw|new|import|export|from|require|module|async|await|yield|null|undefined|true|false|this|super|typeof|instanceof|default|extends|of|in)\b/g;
-  // Tokenize: strings, keywords, numbers, rest
-  var re=/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)/g;
-  var parts=[],lastIdx=0,m;
-  while((m=re.exec(s))!==null){
-    if(m.index>lastIdx)parts.push({t:s.slice(lastIdx,m.index),k:"code"});
-    if(m[1])parts.push({t:m[1],k:"str"});
-    else if(m[2])parts.push({t:m[2],k:"num"});
-    lastIdx=re.lastIndex;
-  }
-  if(lastIdx<s.length)parts.push({t:s.slice(lastIdx),k:"code"});
-  // Apply keywords to "code" parts
-  var result=[];
-  parts.forEach(function(p){
-    if(p.k==="str"){result.push({text:p.t,color:"#ce9178"});return;}
-    if(p.k==="num"){result.push({text:p.t,color:"#b5cea8"});return;}
-    // Split by keywords
-    var last=0;kw.lastIndex=0;
-    var km;
-    while((km=kw.exec(p.t))!==null){
-      if(km.index>last)result.push({text:p.t.slice(last,km.index),color:null});
-      result.push({text:km[0],color:"#569cd6"});
-      last=kw.lastIndex;
-    }
-    if(last<p.t.length)result.push({text:p.t.slice(last),color:null});
-  });
-  return result.length?result:[{text:s,color:null}];
-}
-
-var THEMES={
-  light:{bg:"#F5F7FA",w:"#FFFFFF",nv:"#0C1E3F",nvL:"#1A3A6B",bl:"#2563EB",blP:"#DBEAFE",blM:"#EFF6FF",bd:"#D0D8E4",bdL:"#E4EAF1",tx:"#0F1A2A",txM:"#4A5568",txD:"#8896AB",g:"#059669",r:"#E5484D",y:"#E8A317",cBg:"#F0F3F7",f:"'Fira Code',monospace",ui:"'Outfit',system-ui,sans-serif",
-    addBg:"#EEFBF5",addBd:"#99F0D0",delBg:"#FFF0F0",delBd:"#FECACA",modBg:"#FFF8EB",modBd:"#FDE68A",
-    okBg:"#EEFBF5",okBd:"#99F0D0",warnBg:"#FFF8EB",warnBd:"#FDE68A",warnTx:"#92400E",errBg:"#FFF0F0",errBd:"#FECACA",
-    hdrBg:"#FFFFFF",gradA:"#0C1E3F",gradB:"#2563EB",inputBg:"#FFFFFF",hoverBg:"#F0F3F7",selBg:"#EEFBF5",
-    scoreLow:"#FFF0F0",scoreMed:"#FFF8EB",scoreHi:"#EEFBF5",tagBg:"#F0F3F7",
-    modalBg:"rgba(10,15,25,.35)",shadowSm:"0 1px 3px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.03)",shadowLg:"0 24px 48px rgba(0,0,0,.12)"},
-  dark:{bg:"#0A0D14",w:"#111620",nv:"#94A3B8",nvL:"#7E8FA6",bl:"#5B8DBF",blP:"#172A42",blM:"#0F1730",bd:"#1E2738",bdL:"#161D2B",tx:"#E4E9F2",txM:"#8896AB",txD:"#4F5D73",g:"#4ADE80",r:"#F87171",y:"#FBBF24",cBg:"#0E1219",f:"'Fira Code',monospace",ui:"'Outfit',system-ui,sans-serif",
-    addBg:"#0B1F15",addBd:"#166534",delBg:"#1C0F11",delBd:"#991B1B",modBg:"#1A1808",modBd:"#92400E",
-    okBg:"#0B1F15",okBd:"#166534",warnBg:"#1A1808",warnBd:"#92400E",warnTx:"#D4A017",errBg:"#1C0F11",errBd:"#991B1B",
-    hdrBg:"#0E1219",gradA:"#3B6B9E",gradB:"#5B6BAE",inputBg:"#161D2B",hoverBg:"#131924",selBg:"#152A42",
-    scoreLow:"#1C0F11",scoreMed:"#1A1808",scoreHi:"#0B1F15",tagBg:"#161D2B",
-    modalBg:"rgba(0,0,0,.75)",shadowSm:"0 1px 3px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03)",shadowLg:"0 24px 48px rgba(0,0,0,.5)"}
-};
+// doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation,
+// SCORING_RUBRIC, doIntegrationCheck, doIntegrationFix, doReview, doFixPlan
+// extracted to ./services/migrationPhases.js
+// Utility functions (safeParseJSON, mkDiff, mkRisks, syntaxHL) imported from ./services/utils.js
+// THEMES imported from ./config/themes.js
 
 function AppInner() {
   var [dark,setDark]=useState(false);
@@ -2942,6 +635,7 @@ function AppInner() {
   var [fixLd,setFixLd]=useState(false);
   var [fixTab,setFixTab]=useState("plan");
   var [migPhase,setMigPhase]=useState("");
+  var [activeAgent,setActiveAgent]=useState(null);
   var [intR,setIntR]=useState(null);
   var [cbA,setCbA]=useState(null);
   var [shCfg,setShCfg]=useState(false);
@@ -3005,6 +699,29 @@ function AppInner() {
   var cancelRef=useRef(false);
   var activeAbortRef=useRef(null); // holds the current fetch's AbortController so cancel can kill it
   var globalTimerRef=useRef(null); // global 8-min timeout
+
+  // ═══ HUMAN-IN-THE-LOOP GATE SYSTEM ═══
+  // Pipeline pauses at key phases and waits for human approval
+  var [migGate,setMigGate]=useState(null); // { phase, title, message, data, options }
+  var [migGateLog,setMigGateLog]=useState([]); // history of gate decisions
+  var gateResolveRef=useRef(null);
+
+  var waitForGate=useCallback(function(phase,title,message,data,options){
+    return new Promise(function(resolve){
+      gateResolveRef.current=resolve;
+      setMigGate({phase:phase,title:title,message:message,data:data,options:options||{},ts:Date.now()});
+    });
+  },[]);
+
+  var resolveGate=useCallback(function(approved,feedback){
+    if(gateResolveRef.current){
+      var decision={approved:approved,feedback:feedback||"",ts:Date.now()};
+      setMigGateLog(function(p){return p.concat([Object.assign({},migGate,decision)])});
+      gateResolveRef.current(decision);
+      gateResolveRef.current=null;
+      setMigGate(null);
+    }
+  },[migGate]);
 
   // Auto-collapse sidebar on mobile
   useEffect(function(){if(migPhase==="done"&&res.length>0){var already=hist.some(function(h){return h._migTs===migStartTs});if(!already&&migStartTs>0){var ml2=MODELS.find(function(m){return m.id===mod});var dur=migStartTs>0?Date.now()-migStartTs:0;var aud=auditTrail&&auditTrail.phases&&auditTrail.phases.length>0?Object.assign({},auditTrail):{id:"MIG-"+migStartTs,phases:logs.filter(function(l){return l.type==="phase"}).map(function(l,i){return{id:l.subPhase?l.phase.charAt(0).toUpperCase()+l.iter:l.phase.charAt(0).toUpperCase(),name:l.phase+(l.iter?" #"+l.iter:""),phase:l.phase,durationMs:l.durationMs||0,status:l.st||"done",detail:l.detail||"",score:l.score}}),config:{source:(LANGS[sL]||{}).n+" "+sV,target:(LANGS[tL]||{}).n+" "+tV,model:ml2?ml2.n:"",fileCount:files.length}};if(!aud.totalDurationMs)aud.totalDurationMs=dur;if(!aud.startedAt)aud.startedAt=new Date(migStartTs).toISOString();if(!aud.completedAt)aud.completedAt=new Date().toISOString();if(aud.finalScore===null||aud.finalScore===undefined){var sc=null;if(intR&&intR.ok&&intR.result)sc=intR.result.score;if(sc===null&&aud.phases){aud.phases.forEach(function(ph){if(ph.score!==undefined&&ph.score!==null&&(sc===null||ph.score>sc))sc=ph.score})}aud.finalScore=sc}setAuditTrail(aud);setHist(function(p){return [{id:Date.now(),_migTs:migStartTs,date:new Date().toLocaleString(),from:(LANGS[sL]||{}).n+" "+sV,to:(LANGS[tL]||{}).n+" "+tV,ml:ml2?ml2.n:"",fc:files.length,results:res,risks:rsk,integration:intR,audit:aud}].concat(p)})}}},[migPhase]);
@@ -3110,18 +827,19 @@ function AppInner() {
 
   var go=async function(){
     if (!files.length||!tL||!tV) return;
-    setVw("migrating");setProg(0);setRes([]);setLogs([]);setTOut(null);setAiR(null);setDeepR(null);setFixR(null);setIntR(null);setCbA(null);setMigPhase("analysis");setAuditTrail(null);addToast(files.length+" archivo(s)","success");setMigStartTs(Date.now());cancelRef.current=false;
-    _tks={i:0,o:0,calls:0,last:{i:0,o:0}};
-    _cancelled=false;_activeController=null;
+    setVw("migrating");setProg(0);setRes([]);setLogs([]);setTOut(null);setAiR(null);setDeepR(null);setFixR(null);setIntR(null);setCbA(null);setMigPhase("analysis");setAuditTrail(null);setMigGate(null);setMigGateLog([]);gateResolveRef.current=null;addToast(files.length+" archivo(s)","success");setMigStartTs(Date.now());cancelRef.current=false;
+    resetTks();
+    setCancelled(false);setActiveController(null);
     // ═══ GLOBAL TIMEOUT: 8 minutes max — auto-cancel if pipeline hangs ═══
     var GLOBAL_TIMEOUT=Math.max(10*60*1000,(2*60*1000)+(files.length*90*1000)+(3*60*1000));
     if(globalTimerRef.current)clearTimeout(globalTimerRef.current);
     globalTimerRef.current=setTimeout(function(){
       if(cancelRef.current)return; // already cancelled
-      _cancelled=true;cancelRef.current=true;
+      setCancelled(true);cancelRef.current=true;
       if(_activeController)try{_activeController.abort()}catch(e){}
       setLogs(function(p){return p.concat([{type:"phase",phase:"global_timeout",st:"done",ts:Date.now(),detail:"Auto-cancelled: exceeded 8 min limit"}])});
-      setMigPhase("done");
+      setActiveAgent(null);
+    setMigPhase("done");
       setTimeout(function(){if(res.length)setVw("results");else setVw("upload")},1000);
     },GLOBAL_TIMEOUT);
     try { // ═══ PIPELINE TRY — catches cancellations and timeouts gracefully ═══
@@ -3163,6 +881,7 @@ function AppInner() {
     };
 
     // ═══ PHASE A: Codebase Analysis (0-10%) ═══
+    setActiveAgent("architect");
     setMigPhase("analysis");
     setLogs([{type:"phase",phase:"analysis",st:"run",ts:Date.now()}]);
     setProg(2);
@@ -3174,7 +893,20 @@ function AppInner() {
     setLogs(function(p){return p.map(function(l){return l.phase==="analysis"?Object.assign({},l,{st:"done",detail:cbCtx.ok?(cbCtx.analysis.purpose||""):"Error",durationMs:Date.now()-l.ts}):l})});
     setProg(W.a);
 
+    // ═══ GATE: Post-Analysis — Ask human to review before migrating ═══
+    if(!cancelRef.current){
+      var analysisSum=cbCtx.ok?(cbCtx.analysis.purpose||"Análisis completado"):"Error en análisis";
+      var fileOrder=(cbCtx.ok&&cbCtx.analysis.migrationOrder)?cbCtx.analysis.migrationOrder:files.map(function(f){return f.name});
+      var gateA=await waitForGate("analysis","Análisis completado",
+        analysisSum+"\n\nSe encontraron "+files.length+" archivo(s). Orden de migración propuesto:\n"+fileOrder.map(function(f,i){return (i+1)+". "+f}).join("\n"),
+        {analysis:cbCtx,fileOrder:fileOrder},
+        {approveLabel:"Continuar migración",rejectLabel:"Cancelar"}
+      );
+      if(!gateA.approved){cancelRef.current=true;setMigPhase("done");return;}
+    }
+
     // ═══ PHASE B: Migrate files in dependency order, passing already-migrated context ═══
+    setActiveAgent("developer");
     setMigPhase("migration");
     var phB=phaseStart("B","File Migration",{fileCount:files.length,files:[]});
     var rs=[];
@@ -3255,7 +987,8 @@ function AppInner() {
 
       // Step 2: Migrate — execute the plan (tokens/timeout from capacity)
       audit.apiCalls++;
-      var r=await doMigrate(f.content,thisName,sL,sV,tL,tV,mod,pr,cbCtx,rs,targetFN,isCross?fileMap:null,filePlan,cap);
+      var successfulSiblings=rs.filter(function(s){return !s.failed});
+      var r=await doMigrate(f.content,thisName,sL,sV,tL,tV,mod,pr,cbCtx,successfulSiblings,targetFN,isCross?fileMap:null,filePlan,cap);
       var d=mkDiff(f.content,r.migrated);
       rs.push(Object.assign({},f,r,{diff:d,targetName:targetFN,targetPath:targetPath,isCross:isCross}));
       var thisChanges=r.changes.length;
@@ -3273,6 +1006,27 @@ function AppInner() {
       })});
       setProg(Math.round(W.a+W.b*((fileIdx+1)/fc)));
       setRes(rs.slice());
+
+      // ═══ GATE: Post-File — Ask human to approve each file migration ═══
+      if(!cancelRef.current&&gateResolveRef.current!=="skip"){
+        var changesList=r.changes.length>0?r.changes.slice(0,5).map(function(c,ci){return "• "+c}).join("\n"):"Sin cambios detectados";
+        var gateF=await waitForGate("file","Archivo migrado: "+(targetFN||thisName),
+          "Archivo: "+thisName+" → "+(targetFN||thisName)+"\nCambios: "+r.changes.length+"\n"+changesList+
+          "\n\nLíneas: "+f.content.split("\n").length+" → "+r.migrated.split("\n").length,
+          {fileIdx:fileIdx,fileName:thisName,targetName:targetFN,changes:r.changes,migrated:r.migrated,original:f.content},
+          {approveLabel:"Aprobar "+(fileIdx+1)+"/"+fc,rejectLabel:"Rechazar y re-migrar",skipLabel:fc>1?"Aprobar todos restantes":null}
+        );
+        if(gateF.feedback==="skip_all"){ gateResolveRef.current="skip"; } // skip remaining file gates
+        if(!gateF.approved&&gateF.feedback){
+          // Re-migrate with feedback
+          audit.apiCalls++;
+          var rr2=await doMigrate(f.content,thisName,sL,sV,tL,tV,mod,pr,cbCtx,rs.slice(0,-1),targetFN,isCross?fileMap:null,
+            Object.assign({},filePlan,{userFeedback:gateF.feedback}),cap);
+          var d2=mkDiff(f.content,rr2.migrated);
+          rs[rs.length-1]=Object.assign({},f,rr2,{diff:d2,targetName:targetFN,targetPath:targetPath,isCross:isCross});
+          setRes(rs.slice());
+        }
+      }
     };
     for (var i=0;i<fc;i++) { if (cancelRef.current) break; await migrateOneFile(i); }
     // Safety: ensure ALL file logs are marked done (handles any remaining closure edge cases)
@@ -3281,6 +1035,7 @@ function AppInner() {
 
     // ═══ PHASE B2: Consolidation — 2-phase: audit dependencies then fix ═══
     if (fc>1 && !cancelRef.current) {
+      setActiveAgent("developer");
       setMigPhase("consolidation");
       var isCross=sL!==tL;
 
@@ -3320,11 +1075,23 @@ function AppInner() {
         setLogs(function(p){return p.map(function(l){return l.subPhase==="fix"&&l.type==="phase"?Object.assign({},l,{st:"error"}):l})});
       }
       setProg(W.a+W.b+W.b2);
+
+      // ═══ GATE: Post-Consolidation — Review cross-file fixes ═══
+      if(!cancelRef.current&&consResult.ok){
+        var consMsg="Consolidación completada.\nConexiones: "+auditConns+", Rotas: "+auditBroken+", Issues: "+auditIssues;
+        if(consResult.ok&&consFixed>0)consMsg+="\nArchivos corregidos: "+consFixed;
+        var gateB2=await waitForGate("consolidation","Consolidación cross-file",consMsg,
+          {connections:auditConns,broken:auditBroken,issues:auditIssues,fixed:consFixed},
+          {approveLabel:"Continuar a validación",rejectLabel:"Cancelar"}
+        );
+        if(!gateB2.approved){cancelRef.current=true;setMigPhase("done");return;}
+      }
     }
 
     // ═══ PHASE C+D LOOP: Check → Fix → Re-check (up to 2 iterations, stall detection) ═══
     // With strict 8-layer scoring, 90+ means production-ready
     var INT_PASS=90, INT_MAX=2;
+    setActiveAgent("qa");
     setMigPhase("integration");
     var intCheck=null, intIter=0, prevCtx=null, prevIssues=null, lastScore=-1;
     var bestScore=-1, bestRs=null; // Track best results for rollback
@@ -3396,6 +1163,20 @@ function AppInner() {
       }
       lastScore=intScore;
 
+      // ═══ GATE: Post-Integration-Check — Show score and ask whether to fix ═══
+      if(!cancelRef.current){
+        var issuesSummary=critCount>0?critCount+" críticos, ":"";
+        issuesSummary+=majorCount>0?majorCount+" mayores, ":"";
+        issuesSummary+=modCount>0?modCount+" moderados":"sin issues graves";
+        var gateC=await waitForGate("integration","Validación: "+intScore+"/100",
+          "Score de integración: "+intScore+"/100 (mínimo: "+INT_PASS+")\nIssues: "+issuesSummary+
+          "\n\n¿Aplicar correcciones automáticas?",
+          {score:intScore,issues:intAllIssues,critical:critCount,major:majorCount},
+          {approveLabel:"Corregir issues ("+intAllIssues+")",rejectLabel:"Aceptar tal cual",skipLabel:"Finalizar migración"}
+        );
+        if(!gateC.approved){break;} // accept as-is, skip fix
+      }
+
       // D: Fix — iteration 1 fixes all (including quality gaps), later iterations focus critical+major
       var fixableIssues=intIter<=2?intIssues:intIssues.filter(function(is){return is.severity==="critical"||is.severity==="major"||is.severity==="moderate"});
       if (fixableIssues.length===0) fixableIssues=intIssues; // fallback to all if filter is empty
@@ -3424,14 +1205,14 @@ function AppInner() {
       prevIssues=intIssues;
       prevCtx={
         verified:(intCheck.ok?(intCheck.result.verified||[]):[]),
-        fixedIssues:(intIssues||[]).length,
-        modifiedFiles:[],
-        untouchedFiles:[]
+        fixedIssues:intIssues||[],
+        modifiedFiles:Object.keys(fixResult.files||{}),
+        untouchedFiles:rs.filter(function(r){return !(fixResult.files||{})[r.targetName||r.name]&&!(fixResult.files||{})[r.name]}).map(function(r){return r.targetName||r.name})
       };
     }
     setProg(100);
     if(globalTimerRef.current){clearTimeout(globalTimerRef.current);globalTimerRef.current=null;}
-    _cancelled=false;_activeController=null;
+    setCancelled(false);setActiveController(null);
     setMigPhase("done");
     setIntR(intCheck);
     audit.completedAt=new Date().toISOString();
@@ -3444,7 +1225,7 @@ function AppInner() {
     if(document.hidden){document.title=APP.n;setTimeout(function(){document.title=APP.n},10000);}
     } catch(pipeErr) {
       if(globalTimerRef.current){clearTimeout(globalTimerRef.current);globalTimerRef.current=null;}
-      _cancelled=false;_activeController=null;
+      setCancelled(false);setActiveController(null);
       audit.completedAt=new Date().toISOString();
       audit.totalDurationMs=Date.now()-migStart;
       audit.finalScore=(function(){var bs=null;audit.phases.forEach(function(ph){if(ph.score!==undefined&&ph.score!==null&&(bs===null||ph.score>bs))bs=ph.score});return bs})();
@@ -3589,13 +1370,14 @@ function AppInner() {
             {!sideCol&&<span style={{fontSize:14,fontWeight:800,color:dark?"#fff":"#1E293B",whiteSpace:"nowrap"}}>{"MigraOps"}</span>}{!sideCol&&<img src={SII_LOGO} style={{height:16,opacity:dark?.35:.5,marginLeft:"auto"}} alt=""/>}
           </div>
           <div style={{padding:8,flex:1}}>
-            <button onClick={function(){setVw("dashboard")}} className="hv-glow" className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="dashboard"?"3px solid #60A5FA":"3px solid transparent",background:vw==="dashboard"?"rgba(37,99,235,.15)":"transparent",marginBottom:2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="dashboard"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="dashboard"?700:500,color:vw==="dashboard"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideDash}</span>}</button>
-            <button onClick={function(){setVw("upload")}} className="hv-glow" className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="upload"||vw==="configure"||vw==="migrating"?"3px solid #60A5FA":"3px solid transparent",background:vw==="upload"||vw==="configure"||vw==="migrating"?"rgba(37,99,235,.15)":"transparent",marginBottom:2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="upload"||vw==="configure"||vw==="migrating"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><path d="M12 4v16M4 12h16"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="upload"||vw==="configure"?700:500,color:vw==="upload"||vw==="configure"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideNew}</span>}</button>
+            <button onClick={function(){setVw("dashboard")}} className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="dashboard"?"3px solid #60A5FA":"3px solid transparent",background:vw==="dashboard"?"rgba(37,99,235,.15)":"transparent",marginBottom:2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="dashboard"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="dashboard"?700:500,color:vw==="dashboard"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideDash}</span>}</button>
+            <button onClick={function(){setVw("upload")}} className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="upload"||vw==="configure"||vw==="migrating"?"3px solid #60A5FA":"3px solid transparent",background:vw==="upload"||vw==="configure"||vw==="migrating"?"rgba(37,99,235,.15)":"transparent",marginBottom:2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="upload"||vw==="configure"||vw==="migrating"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><path d="M12 4v16M4 12h16"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="upload"||vw==="configure"?700:500,color:vw==="upload"||vw==="configure"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideNew}</span>}</button>
             <button onClick={function(){if(res.length>0)setVw("results")}} style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:res.length>0?"pointer":"default",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="results"?"3px solid #60A5FA":"3px solid transparent",background:vw==="results"?"rgba(37,99,235,.15)":"transparent",marginBottom:2,opacity:res.length>0?1:.35}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="results"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><path d="M4 12l5 5L20 7"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="results"?700:500,color:vw==="results"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideResults}</span>}{!sideCol&&res.length>0&&<span style={{marginLeft:"auto",padding:"1px 6px",borderRadius:8,fontSize:8,fontWeight:700,background:T.bl,color:"#fff",minWidth:16,textAlign:"center"}}>{res.length}</span>}</button>
-            <button onClick={function(){setVw("history")}} className="hv-glow" className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="history"?"3px solid #60A5FA":"3px solid transparent",background:vw==="history"?"rgba(37,99,235,.15)":"transparent",marginBottom:2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="history"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="history"?700:500,color:vw==="history"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideHist}</span>}</button>
+            <button onClick={function(){setVw("history")}} className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="history"?"3px solid #60A5FA":"3px solid transparent",background:vw==="history"?"rgba(37,99,235,.15)":"transparent",marginBottom:2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="history"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="history"?700:500,color:vw==="history"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{t.sideHist}</span>}</button>
+            <button onClick={function(){if(files.length>0)setVw("chat")}} style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:files.length>0?"pointer":"default",display:"flex",alignItems:"center",gap:10,borderLeft:vw==="chat"?"3px solid #60A5FA":"3px solid transparent",background:vw==="chat"?"rgba(37,99,235,.15)":"transparent",marginBottom:2,opacity:files.length>0?1:.35}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={vw==="chat"?"#60A5FA":(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>{!sideCol&&<span style={{fontSize:12,fontWeight:vw==="chat"?700:500,color:vw==="chat"?(dark?"#fff":T.nv):(dark?"rgba(255,255,255,.55)":T.txM)}}>{"Chat IA"}</span>}</button>
             <button onClick={function(){setVw("graph")}} className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",border:"none",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:8,background:vw==="graph"?T.selBg:"transparent",color:dark?"#fff":T.nv,fontSize:sideCol?13:11,fontWeight:vw==="graph"?700:500,fontFamily:T.ui,borderLeft:vw==="graph"?"3px solid "+T.bl:"3px solid transparent"}}><svg width={sideCol?18:14} height={sideCol?18:14} viewBox="0 0 24 24" fill="none" stroke={vw==="graph"?T.bl:(dark?"rgba(255,255,255,.4)":T.txD)} strokeWidth="1.8"><circle cx="5" cy="5" r="3"/><circle cx="19" cy="5" r="3"/><circle cx="12" cy="19" r="3"/><line x1="7.5" y1="6.5" x2="10" y2="17"/><line x1="16.5" y1="6.5" x2="14" y2="17"/><line x1="8" y1="5" x2="16" y2="5"/></svg>{!sideCol&&<span style={{fontFamily:T.ui}}>{"Grafo"}</span>}</button>
             <div style={{borderTop:"1px solid rgba(255,255,255,.06)",margin:"8px 0"}}/>
-            <button onClick={function(){setShCfg(true)}} className="hv-glow" className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,background:"transparent"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={dark?"rgba(255,255,255,.4)":"#94A3B8"} strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M4.2 4.2l2.8 2.8m10-2.8l-2.8 2.8M1 12h4m14 0h4"/></svg>{!sideCol&&<span style={{fontSize:12,color:"rgba(255,255,255,.55)"}}>{t.sideCfg}</span>}</button>
+            <button onClick={function(){setShCfg(true)}} className="hv-glow" style={{width:"100%",padding:sideCol?"8px":"7px 10px",borderRadius:8,border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,background:"transparent"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={dark?"rgba(255,255,255,.4)":"#94A3B8"} strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M4.2 4.2l2.8 2.8m10-2.8l-2.8 2.8M1 12h4m14 0h4"/></svg>{!sideCol&&<span style={{fontSize:12,color:"rgba(255,255,255,.55)"}}>{t.sideCfg}</span>}</button>
           </div>
           <div style={{borderTop:"1px solid "+(dark?"rgba(255,255,255,.06)":"rgba(0,0,0,.08)"),padding:sideCol?"10px":"12px 14px"}}>
             {!sideCol&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><div style={{width:28,height:28,borderRadius:8,background:"#334155",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:"#fff"}}>{userName?userName[0].toUpperCase():"U"}</div><div><div style={{fontSize:11,fontWeight:700,color:dark?"#fff":"#1E293B"}}>{userName}</div><div style={{fontSize:9,color:"rgba(255,255,255,.3)"}}>{"SII Group"}</div></div></div>}
@@ -3675,6 +1457,18 @@ function AppInner() {
             </div>
           </div>}
         </div>
+
+        {/* ── GitHub Import ── */}
+        <button onClick={function(){setGhPanel(true)}} style={{width:"100%",padding:"14px 20px",borderRadius:14,border:"1.5px solid "+(dark?"rgba(255,255,255,.08)":"rgba(0,0,0,.08)"),background:dark?"rgba(255,255,255,.03)":"#FAFBFC",cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"all .2s",fontFamily:T.ui}}>
+          <div style={{width:36,height:36,borderRadius:10,background:dark?"#161B22":"#24292f",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <svg width="20" height="20" viewBox="0 0 16 16" fill={dark?"#fff":"#fff"}><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          </div>
+          <div style={{flex:1,textAlign:"left"}}>
+            <div style={{fontSize:13,fontWeight:700,color:dark?"#fff":T.nv}}>{t.ghRepoL||"GitHub Repository"}</div>
+            <div style={{fontSize:10,color:T.txD}}>{t.ghRepoDesc||"Import files directly from any repo"}</div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.txD} strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
 
         {/* ── Loaded files ── */}
         {files.length>0 && <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -3818,6 +1612,7 @@ function AppInner() {
             <div style={{display:"flex",gap:6}}>
               {(sL==="java"||sL==="kotlin"||tL==="kotlin")&&<button disabled={andReportLd} onClick={async function(){setAndReportLd(true);setAndReport(null);var rv=await generateAndroidReport(files,sL,sV,tL,tV,mod,uiL);setAndReport(rv);setAndReportLd(false);if(rv.ok)setShAndReport(true)}} style={Object.assign({},S.btn("ai"),{padding:"12px 18px",fontSize:12,opacity:andReportLd?.6:1})}>{andReportLd?"⏳ ...":t.andGenReport}</button>}
               <button disabled={qaTestsLd} onClick={async function(){setQaTestsLd(true);setQaPreR(null);setQaPostR(null);var rv=await generateAndRunQA(files,sL,sV,mod,"pre",null);if(rv.ok){setQaTests(rv.suite);setQaPreR(rv.results);setShQaPanel(true)}else{setQaTests(null);setQaPreR(null);}var vr=await runVirtualQA(files,sL,sV,mod,"pre");if(vr.ok){setQaVPreR(vr.virtual)}setQaTestsLd(false);if(!rv.ok&&!vr.ok){alert("Error: "+(rv.error||vr.error||"Unknown"))}}} style={Object.assign({},S.btn("ai"),{padding:"12px 18px",fontSize:12,opacity:qaTestsLd?.6:1})}>{qaTestsLd?t.qaRunning:t.qaGenerate}</button>
+              <button onClick={function(){setVw("chat")}} style={Object.assign({},S.btn("ai"),{padding:"14px 24px",fontSize:13,borderRadius:10,display:"inline-flex",alignItems:"center",gap:6})}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>{"Chat IA"}</button>
               <button onClick={go} aria-label={t.migrate} className="mig-btn" style={Object.assign({},S.btn("p"),{padding:"14px 32px",fontSize:14,letterSpacing:"-.01em",animation:"pulseGlow 2.5s ease-in-out infinite",transition:"all .25s",borderRadius:10})}>{t.migrate}</button>
             </div>
           </div></div>}
@@ -4093,10 +1888,11 @@ function AppInner() {
         // API call count
         var apiCount=phaseLogs.length+doneFiles.length+(activeFile?1:0);
 
-        return <div style={{display:"flex",flexDirection:"column",gap:10,maxWidth:700,margin:"0 auto",paddingTop:8}}>
+        return <div style={{paddingTop:6,height:"calc(100vh - 90px)",overflowY:"auto",scrollbarWidth:"thin"}}>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
 
           {/* ═══ HEADER — Dark gradient bar with context + live clock ═══ */}
-          <div style={{background:"linear-gradient(135deg,"+T.nv+","+T.nvL+")",borderRadius:14,padding:"14px 20px",color:"#fff"}}>
+          <div style={{background:"linear-gradient(135deg,"+T.nv+","+T.nvL+")",borderRadius:12,padding:"10px 16px",color:"#fff"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
               <div>
                 <div style={{fontSize:14,fontWeight:800,display:"flex",alignItems:"center",gap:6}}>
@@ -4117,7 +1913,7 @@ function AppInner() {
                   <div style={{fontFamily:T.f,fontSize:24,fontWeight:900,letterSpacing:1,lineHeight:1,color:elS>420?"#fca5a5":elS>360?"#fde68a":"inherit"}}>{elStr}</div>
                   <div style={{fontSize:7,opacity:.6,textTransform:"uppercase",letterSpacing:1}}>{t.mgElapsed+" · "+t.timeLimit}</div>
                 </div>
-                {migPhase!=="done"&&<button onClick={function(){cancelRef.current=true;_cancelled=true;if(_activeController)try{_activeController.abort()}catch(e){}_activeController=null;if(globalTimerRef.current){clearTimeout(globalTimerRef.current);globalTimerRef.current=null;}setMigPhase("done");setLogs(function(p){return p.concat([{type:"phase",phase:"cancelled",st:"done",ts:Date.now()}])});setTimeout(function(){if(res.length)setVw("results");else setVw("upload")},500)}} style={{padding:"5px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",background:"rgba(255,255,255,.08)",color:"rgba(255,255,255,.9)",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:T.ui}}>{"✕ "+t.cancel}</button>}
+                {migPhase!=="done"&&<button onClick={function(){cancelRef.current=true;setCancelled(true);if(_activeController)try{_activeController.abort()}catch(e){}setActiveController(null);if(globalTimerRef.current){clearTimeout(globalTimerRef.current);globalTimerRef.current=null;}setMigPhase("done");setLogs(function(p){return p.concat([{type:"phase",phase:"cancelled",st:"done",ts:Date.now()}])});setTimeout(function(){if(res.length)setVw("results");else setVw("upload")},500)}} style={{padding:"5px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",background:"rgba(255,255,255,.08)",color:"rgba(255,255,255,.9)",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:T.ui}}>{"✕ "+t.cancel}</button>}
               </div>
             </div>
             {/* Sub-bar: overall progress thin line */}
@@ -4130,6 +1926,19 @@ function AppInner() {
               {prog>0&&<span style={{fontSize:8,opacity:.7,fontWeight:600}}>{prog>=90?t.encourageAlmost:prog>=70?t.encourageGreat:prog>=50?t.encourageHalf:prog>=25?t.encourageProgress:""}</span>}
             </div>
           </div>
+
+          {/* ═══ ACTIVE AGENT BADGE ═══ */}
+          {activeAgent&&AGENTS[activeAgent]&&(function(){
+            var ag=AGENTS[activeAgent];
+            return <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderRadius:12,background:ag.color+"12",border:"1px solid "+ag.color+"30",animation:"pulse 2s ease-in-out infinite"}}>
+              <span style={{fontSize:18}}>{ag.icon}</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:12,color:ag.color,fontFamily:T.f}}>{ag.name}</div>
+                <div style={{fontSize:9,color:T.txM,fontFamily:T.f}}>working on this phase...</div>
+              </div>
+              <div style={{width:8,height:8,borderRadius:"50%",background:ag.color,animation:"pulse 1.5s ease-in-out infinite"}}/>
+            </div>
+          })()}
 
           {/* ═══ CROSS-LANGUAGE CONTEXT — Module system mapping (only for cross-lang) ═══ */}
           {sL!==tL&&(function(){
@@ -4157,16 +1966,16 @@ function AppInner() {
           })()}
 
           {/* ═══ PROGRESS RING + ACTIVE PHASE CARD ═══ */}
-          <div style={Object.assign({},S.card,{padding:"16px 20px"})}>
-            <div style={{display:"flex",alignItems:"center",gap:20}}>
+          <div style={Object.assign({},S.card,{padding:"12px 16px"})}>
+            <div style={{display:"flex",alignItems:"center",gap:16}}>
               {/* Ring */}
-              <div style={{position:"relative",width:88,height:88,flexShrink:0}}>
-                <svg width="88" height="88" viewBox="0 0 88 88">
-                  <circle cx="44" cy="44" r="38" fill="none" stroke={dark?"#2d3348":"#e8ecf0"} strokeWidth="5"/>
-                  <circle cx="44" cy="44" r="38" fill="none" stroke={curPhDef.c} strokeWidth="5" strokeDasharray={prog*2.39+" 239"} strokeLinecap="round" transform="rotate(-90 44 44)" style={{transition:"stroke-dasharray .6s ease"}}/>
+              <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
+                <svg width="64" height="64" viewBox="0 0 64 64">
+                  <circle cx="32" cy="32" r="27" fill="none" stroke={dark?"#2d3348":"#e8ecf0"} strokeWidth="4"/>
+                  <circle cx="32" cy="32" r="27" fill="none" stroke={curPhDef.c} strokeWidth="4" strokeDasharray={prog*1.7+" 170"} strokeLinecap="round" transform="rotate(-90 32 32)" style={{transition:"stroke-dasharray .6s ease"}}/>
                 </svg>
                 <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                  <div style={{fontSize:20,fontWeight:900,fontFamily:T.f,color:T.nv,lineHeight:1}}>{prog+"%"}</div>
+                  <div style={{fontSize:16,fontWeight:900,fontFamily:T.f,color:T.nv,lineHeight:1}}>{prog+"%"}</div>
                   <div style={{fontSize:7,color:T.txD,fontWeight:600}}>{doneFiles.length+"/"+fc}</div>
                 </div>
               </div>
@@ -4204,7 +2013,7 @@ function AppInner() {
             var costStr=costUsd>0?(costUsd<0.01?"<$0.01":"$"+costUsd.toFixed(3)):"--";
             var tkTotal=_tks.i+_tks.o;
             var tkStr=tkTotal>0?(tkTotal>1000?Math.round(tkTotal/1000)+"k":String(tkTotal)):"--";
-            return <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5}}>
+            return <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
               {[
                 {l:t.mgFiles,v:doneFiles.length+"/"+fc,ic:"",c:T.bl,sub:pendingCount>0?pendingCount+" "+t.mgPending.toLowerCase():""},
                 {l:t.mgApiCalls,v:String(_tks.calls||apiCount),ic:"🔌",c:"#6366f1",sub:""},
@@ -4212,15 +2021,39 @@ function AppInner() {
                 {l:t.mgTokens,v:tkStr,ic:"🔤",c:"#d97706",sub:linesProc>0?linesProc.toLocaleString()+" ln":""},
                 {l:t.mgCost,v:costStr,ic:"💰",c:"#dc2626",sub:mlObj?mlObj.n:""}
               ].map(function(m,i){
-                return <div key={i} style={{padding:"6px 4px",borderRadius:10,background:T.w,border:"1px solid "+T.bdL,textAlign:"center"}}>
-                  <div style={{fontSize:10,marginBottom:1}}>{m.ic}</div>
-                  <div style={{fontSize:13,fontWeight:900,color:m.c,fontFamily:T.f,lineHeight:1}}>{m.v}</div>
-                  <div style={{fontSize:6,color:T.txD,fontWeight:600,textTransform:"uppercase",marginTop:2}}>{m.l}</div>
-                  {m.sub&&<div style={{fontSize:6,color:T.txM}}>{m.sub}</div>}
+                return <div key={i} style={{padding:"8px 6px",borderRadius:10,background:T.w,border:"1px solid "+T.bdL,textAlign:"center"}}>
+                  <div style={{fontSize:11,marginBottom:2}}>{m.ic}</div>
+                  <div style={{fontSize:14,fontWeight:900,color:m.c,fontFamily:T.f,lineHeight:1.1}}>{m.v}</div>
+                  <div style={{fontSize:8,color:T.txD,fontWeight:600,textTransform:"uppercase",marginTop:3}}>{m.l}</div>
+                  {m.sub&&<div style={{fontSize:7,color:T.txM,marginTop:1}}>{m.sub}</div>}
                 </div>
               })}
             </div>
           })()}
+
+          {/* ═══ HUMAN GATE — Approval card when pipeline is waiting ═══ */}
+          {migGate&&<div style={{border:"2px solid #f59e0b",borderRadius:12,background:dark?"rgba(245,158,11,.08)":"#fffbeb",animation:"fadeIn .3s ease",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"10px 14px",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#fff",display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+              <div style={{flex:1}}><div style={{fontSize:12,fontWeight:800}}>{migGate.title}</div>
+              <div style={{fontSize:8,opacity:.85}}>{"Fase: "+migGate.phase+" · Esperando tu decisión"}</div></div>
+              <div style={{width:8,height:8,borderRadius:"50%",background:"#fff",animation:"pulse 1.2s infinite",flexShrink:0}}/>
+            </div>
+            <div style={{padding:"10px 14px",overflowY:"auto",maxHeight:160,flexShrink:1}}>
+              <div style={{fontSize:11,color:dark?"#fbbf24":"#92400e",lineHeight:1.5,whiteSpace:"pre-line",fontFamily:T.ui}}>{migGate.message}</div>
+              {migGate.data&&migGate.data.migrated&&<details style={{marginTop:8}}>
+                <summary style={{fontSize:10,fontWeight:700,color:T.bl,cursor:"pointer"}}>{"Ver código migrado"}</summary>
+                <pre style={{maxHeight:150,overflow:"auto",padding:6,borderRadius:6,background:T.cBg,fontSize:9,border:"1px solid "+T.bdL,marginTop:4}}>{migGate.data.migrated.slice(0,2000)}</pre>
+              </details>}
+            </div>
+            <div style={{padding:"8px 14px 12px",flexShrink:0,borderTop:"1px solid "+(dark?"rgba(245,158,11,.2)":"rgba(217,119,6,.15)"),background:dark?"rgba(245,158,11,.04)":"rgba(255,251,235,.8)"}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button onClick={function(){resolveGate(true,"")}} style={Object.assign({},S.btn("g"),{padding:"8px 18px",fontSize:11,fontWeight:700})}>{(migGate.options&&migGate.options.approveLabel)||"Aprobar"}</button>
+                {migGate.options&&migGate.options.skipLabel&&<button onClick={function(){resolveGate(true,"skip_all")}} style={Object.assign({},S.btn(),{padding:"8px 14px",fontSize:10})}>{migGate.options.skipLabel}</button>}
+                <button onClick={function(){var reason=prompt("¿Qué cambios necesitas?")||"";if(reason)resolveGate(false,reason);else resolveGate(false,"")}} style={Object.assign({},S.btn("r"),{padding:"8px 16px",fontSize:10,fontWeight:700})}>{(migGate.options&&migGate.options.rejectLabel)||"Rechazar"}</button>
+              </div>
+            </div>
+          </div>}
 
           {/* ═══ PHASE PIPELINE — Connected stepper ═══ */}
           <div style={Object.assign({},S.card,{padding:"10px 14px"})}>
@@ -4439,6 +2272,7 @@ function AppInner() {
             </div>
           })()}
 
+        </div>
         </div>
       })()}
 
@@ -5316,6 +3150,10 @@ function AppInner() {
         </div>
       </div>}
     
+      {vw==="chat"&&<ChatView T={T} dark={dark} t={t} files={files} sL={sL} sV={sV} tL={tL} tV={tV} mod={mod} onFilesMigrated={function(migrated){setRes(migrated);setVw("results")}} />}
+
+      {ghPanel&&<GitHubPanel T={T} dark={dark} t={t} onImportFiles={function(imported){setFiles(function(p){var existing=p.map(function(x){return x.name});return p.concat(imported.filter(function(x){return existing.indexOf(x.name)===-1}))});if(!sL&&imported.length>0&&imported[0].lang)setSL(imported[0].lang);setDet(null);setGhPanel(false)}} onClose={function(){setGhPanel(false)}} />}
+
           {/* LANGUAGE TOOLTIP PORTAL */}
       {hovLang&&LANG_META[hovLang]&&<div style={{position:"fixed",top:hovLangPos.y,left:hovLangPos.x,transform:"translateX(-50%)",width:280,borderRadius:14,background:dark?"#1A2236":"#fff",border:"1px solid "+(dark?"rgba(255,255,255,.1)":"rgba(0,0,0,.08)"),boxShadow:"0 12px 40px rgba(0,0,0,"+(dark?".4":".15")+")",zIndex:99999,animation:"fadeIn .15s ease"}} onMouseLeave={function(){setHovLang(null)}}>
         <div style={{position:"absolute",top:-5,left:"50%",transform:"translateX(-50%) rotate(45deg)",width:10,height:10,background:dark?"#1A2236":"#fff",borderTop:"1px solid "+(dark?"rgba(255,255,255,.1)":"rgba(0,0,0,.08)"),borderLeft:"1px solid "+(dark?"rgba(255,255,255,.1)":"rgba(0,0,0,.08)")}}/>

@@ -20,6 +20,9 @@ router.post('/', async (req, res) => {
   try {
     const { model, max_tokens, system, messages } = req.body;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -33,7 +36,10 @@ router.post('/', async (req, res) => {
         system: system || '',
         messages: messages || [],
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     const data = await response.json();
 
@@ -44,6 +50,10 @@ router.post('/', async (req, res) => {
 
     res.json(data);
   } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error('[Migration Error] Request timed out after 120s');
+      return res.status(504).json({ error: 'Request to Anthropic API timed out after 120 seconds' });
+    }
     console.error('[Migration Error]', error.message);
     res.status(500).json({ error: error.message });
   }

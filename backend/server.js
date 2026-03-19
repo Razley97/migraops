@@ -15,6 +15,7 @@ import { dirname, join } from 'path';
 import migrateRouter from './routes/migrate.js';
 import githubRouter from './routes/github.js';
 import healthRouter from './routes/health.js';
+import conversationRouter from './routes/conversation.js';
 import { rateLimiter } from './middleware/rateLimit.js';
 
 dotenv.config();
@@ -37,6 +38,7 @@ app.use(rateLimiter);
 app.use('/api/migrate', migrateRouter);
 app.use('/api/github', githubRouter);
 app.use('/api/health', healthRouter);
+app.use('/api/conversation', conversationRouter);
 
 // ═══ Production: Serve frontend static files ═══
 if (process.env.NODE_ENV === 'production') {
