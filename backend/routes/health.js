@@ -28,6 +28,7 @@ router.get('/', (req, res) => {
     },
     config: {
       anthropic: !!process.env.ANTHROPIC_API_KEY,
+      deepseek: !!process.env.DEEPSEEK_API_KEY,
       github: !!process.env.GITHUB_TOKEN,
     },
   });

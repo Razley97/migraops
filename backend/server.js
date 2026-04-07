@@ -36,7 +36,7 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:"],
-      connectSrc: ["'self'", "https://api.anthropic.com", "https://api.github.com"],
+      connectSrc: ["'self'", "https://api.anthropic.com", "https://api.github.com", "https://api.deepseek.com"],
     },
   },
   crossOriginEmbedderPolicy: false,

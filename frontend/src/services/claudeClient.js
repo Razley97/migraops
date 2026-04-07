@@ -24,7 +24,7 @@ export async function callClaude(sys,usr,mid,mt,opts) {
     try {
       var r = await fetch("/api/migrate",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||4000,system:sys,messages:[{role:"user",content:usr}]}),
+        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||4000,system:sys,messages:[{role:"user",content:usr}],provider:mid&&mid.startsWith("deepseek")?"deepseek":"anthropic"}),
         signal:controller.signal
       });
       clearTimeout(timer);
