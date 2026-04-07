@@ -403,6 +403,39 @@ export default function MigratingView(props) {
                   </div>}
                 </div>}
 
+                {/* ── Interactive QA Test Results ── */}
+                {pre&&pre.qaTests&&pre.qaTests.length>0&&<div style={{borderRadius:8,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                  <div style={{padding:"8px 12px",background:"linear-gradient(135deg,#7C3AED,#6D28D9)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div style={{fontSize:10,fontWeight:800}}>{"Interactive QA Tests \u2014 "+pre.qaTests.length+" tests"}</div>
+                    <div style={{display:"flex",gap:4}}>
+                      {(function(){var p=pre.qaTests.filter(function(t){return t.status==="pass"}).length;var w=pre.qaTests.filter(function(t){return t.status==="warn"}).length;var f=pre.qaTests.filter(function(t){return t.status==="fail"}).length;return [p>0&&React.createElement("span",{key:"p",style:{padding:"1px 6px",borderRadius:4,fontSize:8,fontWeight:700,background:"rgba(5,150,105,.3)",color:"#34D399"}},p+" pass"),w>0&&React.createElement("span",{key:"w",style:{padding:"1px 6px",borderRadius:4,fontSize:8,fontWeight:700,background:"rgba(217,119,6,.3)",color:"#FBBF24"}},w+" warn"),f>0&&React.createElement("span",{key:"f",style:{padding:"1px 6px",borderRadius:4,fontSize:8,fontWeight:700,background:"rgba(220,38,38,.3)",color:"#F87171"}},f+" fail")]})()}
+                    </div>
+                  </div>
+                  <div style={{maxHeight:500,overflowY:"auto"}}>
+                    {pre.qaTests.map(function(qt,qi){
+                      var stColor=qt.status==="pass"?T.g:qt.status==="warn"?"#D97706":qt.status==="fail"?T.r:"#6366F1";
+                      var stBg=qt.status==="pass"?T.okBg:qt.status==="warn"?T.warnBg:qt.status==="fail"?T.errBg:T.blP;
+                      var catIcons={load:"\uD83D\uDE80",console:"\uD83D\uDCBB",discovery:"\uD83D\uDD0D",interaction:"\uD83D\uDC46",form:"\u270D\uFE0F",scroll:"\u2195\uFE0F",responsive:"\uD83D\uDCF1"};
+                      return <div key={qi} style={{borderBottom:"1px solid "+T.bdL,padding:"10px 12px"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                          <span style={{fontSize:12}}>{catIcons[qt.category]||"\uD83E\uDDEA"}</span>
+                          <span style={{fontSize:10,fontWeight:700,color:T.nv,flex:1}}>{qt.description}</span>
+                          <span style={{padding:"2px 8px",borderRadius:4,fontSize:8,fontWeight:800,background:stBg,color:stColor,textTransform:"uppercase"}}>{qt.status}</span>
+                        </div>
+                        <div style={{fontSize:9,color:T.txM,marginBottom:qt.screenshots&&qt.screenshots.length>0?8:0}}>{qt.findings}</div>
+                        {qt.screenshots&&qt.screenshots.length>0&&<div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+                          {qt.screenshots.map(function(ss,si){
+                            return ss.png?<div key={si} onClick={function(){setExpandedImg({src:"data:image/png;base64,"+ss.png,alt:qt.description+" \u2014 "+ss.stage})}} style={{flexShrink:0,borderRadius:6,border:"1px solid "+T.bdL,overflow:"hidden",cursor:"zoom-in"}}>
+                              <img src={"data:image/png;base64,"+ss.png} alt={ss.stage} style={{width:180,height:110,objectFit:"cover",display:"block"}}/>
+                              <div style={{padding:"2px 6px",fontSize:7,color:T.txD,textAlign:"center",background:T.cBg,fontWeight:600}}>{ss.stage}</div>
+                            </div>:null
+                          })}
+                        </div>}
+                      </div>
+                    })}
+                  </div>
+                </div>}
+
                 {/* ── Post-migration diff screenshots ── */}
                 {postScreenshots.length>0&&<div>
                   <div style={{fontSize:10,fontWeight:700,color:T.txD,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:4}}>
