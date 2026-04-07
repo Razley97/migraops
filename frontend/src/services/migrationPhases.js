@@ -115,7 +115,7 @@ export async function doDeepAnalysis(origFiles,migratedResults,sl,sv,tl,tv,mid,l
   var sys="You are a STRICT senior architect reviewing a "+sn+" "+sv+"\u2192"+tn+" "+tv+" migration ("+migratedResults.length+" files). Respond in "+ln+".\n\nAnalyze 8 layers INDEPENDENTLY with concrete findings per file:\n1) Architecture (15%) 2) Cross-file deps (10%) 3) Async model (15%) 4) Security (20%) 5) Error handling (10%) 6) Types/contracts (10%) 7) Data flow (10%) 8) API preservation (10%)\n\n"+SCORING_RUBRIC+"\n\nScore each layer first. Final score = weighted average. Show math.\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"weighted math\",\"layers\":[{\"name\":\"...\",\"score\":0-100,\"status\":\"pass|warn|fail\",\"detail\":\"1-2 sentences\"}],\"critical\":[{\"files\":[\"file.ext\"],\"category\":\"security|architecture|async|types|dataflow\",\"msg\":\"...\",\"fix\":\"fix\"}],\"improvements\":[{\"files\":[\"file.ext\"],\"category\":\"...\",\"msg\":\"...\",\"suggestion\":\"...\"}],\"strengths\":[\"...\"],\"summary\":\"2-3 sentences\"}";
   var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nDeep SYSTEM-LEVEL analysis. Score each layer independently, compute weighted average. Be strict \u2014 typical migration scores 65-80. ALL text in "+ln+". Respond ONLY JSON.";
   try {
-    var txt=await callAgent('deepAnalysis',sys,usr,mid,3000,{timeout:60000});
+    var txt=await callAgent('deepAnalysis',sys,usr,mid,3000,{timeout:120000,retries:0});
     var cl=safeParseJSON(txt);
     if(!cl)throw new Error("Invalid JSON response");
     // Same JS-side recalculation as integration check
@@ -180,11 +180,11 @@ export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid,opts) {
     if (chainOpts.useChain) {
       var secSys="Review the following codebase analysis for SECURITY concerns in the "+sn+" "+sv+" to "+tn+" "+tv+" migration. Identify: hardcoded secrets, injection vulnerabilities, insecure API usage, dependency risks. Enrich the analysis JSON by adding securityNotes per file and a top-level securityRisks array. Return the COMPLETE enriched JSON.";
       txt=await callAgentChain([
-        {agentId:'architect',sys:sys,usr:usr,mid:mid,mt:4000,opts:{timeout:60000}},
-        {agentId:'security',sys:secSys,usr:'Review and enrich the analysis above. Return enriched JSON only.',mid:mid,mt:3000,opts:{timeout:60000}}
+        {agentId:'architect',sys:sys,usr:usr,mid:mid,mt:4000,opts:{timeout:120000,retries:0}},
+        {agentId:'security',sys:secSys,usr:'Review and enrich the analysis above. Return enriched JSON only.',mid:mid,mt:3000,opts:{timeout:120000,retries:0}}
       ],chainOpts.onAgentChange);
     } else {
-      txt=await callAgent('codebaseAnalysis',sys,usr,mid,4000,{timeout:60000});
+      txt=await callAgent('codebaseAnalysis',sys,usr,mid,4000,{timeout:120000,retries:0});
     }
     var cl=safeParseJSON(txt);
     if(!cl)throw new Error("Invalid JSON response");
