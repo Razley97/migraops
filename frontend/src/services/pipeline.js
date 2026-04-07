@@ -26,6 +26,33 @@ export function getRegisteredPhases() {
   return registeredPhases.slice();
 }
 
+// ── Free-tier resilience helpers ──
+function isFreeProvider(mid) { return mid && (mid.startsWith("gemini") || mid.startsWith("llama") || mid.startsWith("gemma") || mid.startsWith("mixtral")); }
+
+async function wrapPhase(fn, phaseName, emit, isFree) {
+  try { return await fn(); }
+  catch(e) {
+    if (!isFree || !(e.message && (e.message.includes("429") || e.message.includes("overloaded")))) throw e;
+    // Free-tier rate limit — cooldown and retry once
+    var cooldown = 60000;
+    if (emit && emit.setLogs) emit.setLogs(function(p) { return p.concat([{ type: "rate_limit", phase: phaseName, waitMs: cooldown, ts: Date.now(), msg: "Rate limit en " + phaseName + " — esperando " + Math.round(cooldown / 1000) + "s para reintentar" }]); });
+    await new Promise(function(ok) { setTimeout(ok, cooldown); });
+    try { return await fn(); }
+    catch(e2) {
+      // Phase truly failed — skip gracefully
+      if (emit && emit.setLogs) emit.setLogs(function(p) { return p.concat([{ type: "phase_skipped", phase: phaseName, ts: Date.now(), msg: phaseName + " omitida por límites de API gratuita" }]); });
+      return { ok: false, skipped: true, error: e2.message };
+    }
+  }
+}
+
+async function freeTierCooldown(mid, emit, phase) {
+  if (!isFreeProvider(mid)) return;
+  var wait = 15000;
+  if (emit && emit.setLogs) emit.setLogs(function(p) { return p.concat([{ type: "cooldown", phase: phase, waitMs: wait, ts: Date.now(), msg: "Pausa entre fases (" + Math.round(wait / 1000) + "s)" }]); });
+  await new Promise(function(ok) { setTimeout(ok, wait); });
+}
+
 // ── Audit trail helpers ──
 function phaseStart(audit, id, name, meta) {
   var entry = { id: id, name: name, startedAt: new Date().toISOString(), startMs: Date.now(), completedAt: null, durationMs: 0, status: "running" };
@@ -323,11 +350,13 @@ export async function runMigration(config, emit) {
       emit.setMigPhase("consolidation");
 
       // B2a: Dependency Audit
+      await freeTierCooldown(mod, emit, "B-to-B2");
       var phB2a = phaseStart(audit, "B2a", "Dependency Audit", { fileCount: fc });
       emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "consolidation", subPhase: "audit", st: "run", ts: Date.now(), label: "Auditing cross-file dependencies..." }]); });
       emit.setProg(W.a + W.b + 1);
       audit.apiCalls++;
-      var depAudit = await doDependencyAudit(orderedFiles, rs, sL, sV, tL, tV, mod);
+      var depAudit = await wrapPhase(function() { return doDependencyAudit(orderedFiles, rs, sL, sV, tL, tV, mod); }, "B2a-audit", emit, isFreeProvider(mod));
+      if (depAudit.skipped) { depAudit = { ok: false, audit: { issues: [], connections: [] } }; }
       var auditIssues = depAudit.ok && depAudit.audit ? (depAudit.audit.issues || []).length : 0;
       var auditConns = depAudit.ok && depAudit.audit ? (depAudit.audit.connections || []).length : 0;
       var auditBroken = depAudit.ok && depAudit.audit ? (depAudit.audit.connections || []).filter(function(c) { return !c.compatible; }).length : 0;
@@ -339,7 +368,8 @@ export async function runMigration(config, emit) {
       emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "consolidation", subPhase: "fix", st: "run", ts: Date.now(), label: "Fixing " + auditIssues + " issues across " + fc + " files..." }]); });
       emit.setProg(W.a + W.b + 3);
       audit.apiCalls++;
-      var consResult = await doConsolidation(orderedFiles, rs, sL, sV, tL, tV, mod, depAudit);
+      var consResult = await wrapPhase(function() { return doConsolidation(orderedFiles, rs, sL, sV, tL, tV, mod, depAudit); }, "B2b-consolidation", emit, isFreeProvider(mod));
+      if (consResult.skipped) { consResult = { ok: false, error: "skipped due to rate limits" }; }
       if (consResult.ok && consResult.files) {
         var consFixed = 0;
         rs = rs.map(function(r) {
@@ -391,7 +421,9 @@ export async function runMigration(config, emit) {
       var progC = W.a + W.b + W.b2 + Math.round((W.c + W.d) * (ii / (INT_MAX))) + 2;
       emit.setProg(progC);
       audit.apiCalls++;
-      intCheck = await doIntegrationCheck(files, rs, sL, sV, tL, tV, mod, uiL, prevCtx, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } });
+      await freeTierCooldown(mod, emit, "B2-to-C");
+      intCheck = await wrapPhase(function() { return doIntegrationCheck(files, rs, sL, sV, tL, tV, mod, uiL, prevCtx, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "C-integration", emit, isFreeProvider(mod));
+      if (intCheck.skipped) { intCheck = { ok: false, result: { score: 0, issues: [], pass: false } }; break; }
       var intScore = intCheck.ok ? (intCheck.result.score || 0) : 0;
       var intIssues = intCheck.ok ? (intCheck.result.issues || []) : [];
       var intAllIssues = intIssues.length;
@@ -462,7 +494,9 @@ export async function runMigration(config, emit) {
       emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "qa", st: "run", iter: intIter, issues: fixableIssues.length, ts: Date.now() }]); });
       emit.setProg(progC + Math.round((W.c + W.d) / (INT_MAX * 2)));
       audit.apiCalls++;
-      var fixResult = await doIntegrationFix(files, rs, fixableIssues, sL, sV, tL, tV, mod, intIter, prevIssues);
+      await freeTierCooldown(mod, emit, "C-to-D");
+      var fixResult = await wrapPhase(function() { return doIntegrationFix(files, rs, fixableIssues, sL, sV, tL, tV, mod, intIter, prevIssues); }, "D-fix", emit, isFreeProvider(mod));
+      if (fixResult.skipped) { fixResult = { ok: false, files: {} }; }
       var fixedFileCount = 0;
       if (fixResult.ok && fixResult.files) {
         rs = rs.map(function(r) {

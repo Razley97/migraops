@@ -44,7 +44,7 @@ export async function callClaude(sys,usr,mid,mt,opts) {
   var o=opts||{};
   if (_cancelled) throw new Error("Migration cancelled");
   var isFreeProvider=mid&&(mid.startsWith("gemini")||mid.startsWith("llama")||mid.startsWith("gemma")||mid.startsWith("mixtral"));
-  var maxRetries=o.retries!==undefined?o.retries:(isFreeProvider?3:1);
+  var maxRetries=o.retries!==undefined?o.retries:(isFreeProvider?5:1);
   var isSlowProvider=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini-2.5"));
   var timeout=o.timeout||(isSlowProvider?120000:60000);
   for (var attempt=0;attempt<=maxRetries;attempt++) {
@@ -63,7 +63,7 @@ export async function callClaude(sys,usr,mid,mt,opts) {
       clearTimeout(timer);
       _activeController=null;
       if (_cancelled) throw new Error("Migration cancelled");
-      if (r.status===429||r.status===529||r.status===503) { if(attempt<maxRetries){var baseBack=isFreeProvider?8000:3000;var maxBack=isFreeProvider?65000:15000;var backoff=r.status===429?Math.min(maxBack,baseBack*Math.pow(2,attempt)):2000;console.log("[Rate Limit] "+getProviderFromModel(mid)+" 429 — waiting "+Math.round(backoff/1000)+"s (attempt "+(attempt+1)+"/"+maxRetries+")");await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
+      if (r.status===429||r.status===529||r.status===503) { if(attempt<maxRetries){var baseBack=isFreeProvider?8000:3000;var maxBack=isFreeProvider?120000:15000;var backoff=r.status===429?Math.min(maxBack,baseBack*Math.pow(2,attempt)):2000;var retryAfter=r.headers&&r.headers.get?r.headers.get("retry-after"):null;if(retryAfter){var ra=parseInt(retryAfter,10);if(!isNaN(ra)&&ra>0&&ra<300)backoff=ra*1000;}console.log("[Rate Limit] "+getProviderFromModel(mid)+" "+r.status+" — waiting "+Math.round(backoff/1000)+"s (attempt "+(attempt+1)+"/"+maxRetries+")");if(o.onRetry){o.onRetry({attempt:attempt+1,maxAttempts:maxRetries,waitMs:backoff,provider:getProviderFromModel(mid),status:r.status});}await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
       if (!r.ok) throw new Error("API "+r.status);
       var d = await r.json();
       if (d.usage) { _tks.i+=(d.usage.input_tokens||0); _tks.o+=(d.usage.output_tokens||0); _tks.calls++; _tks.last={i:d.usage.input_tokens||0,o:d.usage.output_tokens||0}; }

@@ -137,6 +137,12 @@ export default function MigratingView(props) {
             </div>
           })()}
 
+          {/* ═══ FREE-TIER BANNER — Rate limit warning for free providers ═══ */}
+          {mod&&/^(gemini|llama|gemma|mixtral)/i.test(mod)&&<div style={{background:"rgba(59,130,246,0.1)",borderLeft:"3px solid #3b82f6",padding:"8px 12px",borderRadius:6,fontSize:12,color:"#93c5fd",marginBottom:0,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:14}}>{"ℹ️"}</span>
+            <span>{t.freeTierNote}</span>
+          </div>}
+
           {/* ═══ CROSS-LANGUAGE CONTEXT — Module system mapping (only for cross-lang) ═══ */}
           {sL!==tL&&(function(){
             var srcMod=MODULE_CONVENTIONS[sL]||{};
@@ -305,6 +311,60 @@ export default function MigratingView(props) {
               })}
             </div>
           </div>}
+
+          {/* ═══ RATE-LIMIT / COOLDOWN / SKIPPED PHASE CARDS ═══ */}
+          {(function(){
+            var rlLogs=logs.filter(function(l){return l.type==="rate_limit"||l.type==="cooldown"||l.type==="phase_skipped"});
+            if(!rlLogs.length) return null;
+            return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {rlLogs.map(function(l,i){
+                if(l.type==="rate_limit"){
+                  var remaining=Math.max(0,Math.ceil((l.ts+l.waitMs-now)/1000));
+                  var progressPct=Math.min(100,((l.waitMs-remaining*1000)/l.waitMs*100));
+                  return <div key={"rl-"+i} style={{background:"rgba(245,158,11,0.15)",borderLeft:"3px solid #f59e0b",padding:"10px 14px",borderRadius:8,marginBottom:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:16}}>{"⏳"}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:700,color:"#fbbf24"}}>{l.msg}</div>
+                        <div style={{fontSize:10,color:"#f59e0b",fontFamily:T.f,fontWeight:600,marginTop:2}}>
+                          {remaining>0?(t.rateLimitWait+" "+remaining+"s..."):t.rateLimitWait}
+                        </div>
+                      </div>
+                      {remaining>0&&<div style={{fontFamily:T.f,fontSize:18,fontWeight:900,color:"#f59e0b"}}>{remaining+"s"}</div>}
+                    </div>
+                    <div style={{marginTop:8,height:3,borderRadius:2,background:"rgba(245,158,11,0.2)",overflow:"hidden"}}>
+                      <div style={{height:"100%",borderRadius:2,background:"#f59e0b",width:progressPct+"%",transition:"width 1s linear"}}/>
+                    </div>
+                  </div>
+                }
+                if(l.type==="cooldown"){
+                  var cdRemaining=Math.max(0,Math.ceil((l.ts+l.waitMs-now)/1000));
+                  return <div key={"cd-"+i} style={{background:"rgba(99,102,241,0.1)",borderLeft:"3px solid #6366f1",padding:"8px 12px",borderRadius:6,marginBottom:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:13}}>{"⏸"}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:10,fontWeight:600,color:"#a5b4fc"}}>{l.msg}</div>
+                        {cdRemaining>0&&<div style={{fontSize:9,color:"#818cf8",fontFamily:T.f,marginTop:1}}>{t.interPhaseCooldown+" "+cdRemaining+"s"}</div>}
+                      </div>
+                      {cdRemaining>0&&<div style={{fontFamily:T.f,fontSize:14,fontWeight:800,color:"#818cf8"}}>{cdRemaining+"s"}</div>}
+                    </div>
+                  </div>
+                }
+                if(l.type==="phase_skipped"){
+                  return <div key={"sk-"+i} style={{background:"rgba(156,163,175,0.15)",borderLeft:"3px solid #9ca3af",padding:"8px 12px",borderRadius:6,marginBottom:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:13}}>{"⚠️"}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:10,fontWeight:600,color:"#9ca3af"}}>{l.msg}</div>
+                        <div style={{fontSize:8,color:"#6b7280",marginTop:1}}>{t.phaseSkipped}</div>
+                      </div>
+                    </div>
+                  </div>
+                }
+                return null;
+              })}
+            </div>
+          })()}
 
           {/* ═══ VISUAL QA — Screenshot preview + QA summary ═══ */}
           {(pwPre||pwComparison||visualQA)&&(function(){
