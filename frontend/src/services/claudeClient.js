@@ -15,16 +15,17 @@ export async function callClaude(sys,usr,mid,mt,opts) {
   var o=opts||{};
   if (_cancelled) throw new Error("Migration cancelled");
   var maxRetries=o.retries!==undefined?o.retries:1;
-  var timeout=o.timeout||60000; // 60s default — no call should hang
+  var timeout=o.timeout||(mid&&mid.startsWith("deepseek")?120000:60000);
   for (var attempt=0;attempt<=maxRetries;attempt++) {
     if (_cancelled) throw new Error("Migration cancelled");
+    var defaultMt=mid&&mid.startsWith("deepseek")?8000:4000;
     var controller=new AbortController();
     _activeController=controller; // expose so cancel button can abort
     var timer=setTimeout(function(){controller.abort()},timeout);
     try {
       var r = await fetch("/api/migrate",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||4000,system:sys,messages:[{role:"user",content:usr}],provider:mid&&mid.startsWith("deepseek")?"deepseek":"anthropic"}),
+        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||defaultMt,system:sys,messages:[{role:"user",content:usr}],provider:mid&&mid.startsWith("deepseek")?"deepseek":"anthropic"}),
         signal:controller.signal
       });
       clearTimeout(timer);

@@ -848,6 +848,39 @@ function ResultsView(props) {
                         </div>;
                       })}
                     </div>}
+                    {/* Test Documentation */}
+                    <div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                      <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Test Documentation — Pre-Migration"}</div>
+                      <div style={{padding:"12px 16px",fontSize:10,color:T.txM,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:4}}>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Methodology:"}</span>
+                          <span>{"Playwright browser automation — headless Chromium capture"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Viewport:"}</span>
+                          <span>{"1280×720px (desktop standard)"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Captured At:"}</span>
+                          <span>{pre.capturedAt?new Date(pre.capturedAt).toLocaleString():"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Duration:"}</span>
+                          <span>{(pre.durationMs||0)+"ms"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Routes Tested:"}</span>
+                          <span>{(pre.routeCount||0)+" routes"+(pre.routes?" ("+pre.routes.join(", ")+")":"")}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Screenshots:"}</span>
+                          <span>{(pre.screenshotRefs?pre.screenshotRefs.length:0)+" captured"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"JS Errors:"}</span>
+                          <span style={{color:(pre.jsErrors||[]).length>0?T.r:T.g}}>{(pre.jsErrors||[]).length>0?(pre.jsErrors.length+" errors detected"):"None detected"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"DOM Analysis:"}</span>
+                          <span>{pre.domSummary?(pre.domSummary.nodeCount+" nodes, "+pre.domSummary.uniqueTags+" unique tags"+(pre.domSummary.depth?", depth "+pre.domSummary.depth:"")):"Not available"}</span>
+                        </div>
+                        {pre.metrics&&<div style={{marginTop:4,padding:"8px 12px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL}}>
+                          <div style={{fontSize:9,fontWeight:700,color:T.txD,marginBottom:4}}>{"Performance Metrics"}</div>
+                          <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:9}}>
+                            {pre.metrics.loadTime!=null&&<span>{"Load: "+pre.metrics.loadTime+"ms"}</span>}
+                            {pre.metrics.domContentLoaded!=null&&<span>{"DOMContentLoaded: "+pre.metrics.domContentLoaded+"ms"}</span>}
+                            {pre.metrics.firstPaint!=null&&<span>{"First Paint: "+pre.metrics.firstPaint+"ms"}</span>}
+                            {pre.metrics.largestContentfulPaint!=null&&<span>{"LCP: "+pre.metrics.largestContentfulPaint+"ms"}</span>}
+                          </div>
+                        </div>}
+                      </div>
+                    </div>
                   </React.Fragment>;
                 })()}
 
@@ -881,6 +914,39 @@ function ResultsView(props) {
                         </div>;
                       })}
                     </div>}
+                    {/* Test Documentation */}
+                    <div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                      <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Test Documentation — Post-Migration"}</div>
+                      <div style={{padding:"12px 16px",fontSize:10,color:T.txM,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:4}}>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Methodology:"}</span>
+                          <span>{"Playwright browser automation — headless Chromium capture"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Viewport:"}</span>
+                          <span>{"1280×720px (desktop standard)"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Captured At:"}</span>
+                          <span>{post.capturedAt?new Date(post.capturedAt).toLocaleString():"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Duration:"}</span>
+                          <span>{(post.durationMs||0)+"ms"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Routes Tested:"}</span>
+                          <span>{(post.routeCount||0)+" routes"+(post.routes?" ("+post.routes.join(", ")+")":"")}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Screenshots:"}</span>
+                          <span>{(post.screenshotRefs?post.screenshotRefs.length:0)+" captured"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"JS Errors:"}</span>
+                          <span style={{color:(post.jsErrors||[]).length>0?T.r:T.g}}>{(post.jsErrors||[]).length>0?(post.jsErrors.length+" errors detected"):"None detected"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"DOM Analysis:"}</span>
+                          <span>{post.domSummary?(post.domSummary.nodeCount+" nodes, "+post.domSummary.uniqueTags+" unique tags"+(post.domSummary.depth?", depth "+post.domSummary.depth:"")):"Not available"}</span>
+                        </div>
+                        {post.metrics&&<div style={{marginTop:4,padding:"8px 12px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL}}>
+                          <div style={{fontSize:9,fontWeight:700,color:T.txD,marginBottom:4}}>{"Performance Metrics"}</div>
+                          <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:9}}>
+                            {post.metrics.loadTime!=null&&<span>{"Load: "+post.metrics.loadTime+"ms"}</span>}
+                            {post.metrics.domContentLoaded!=null&&<span>{"DOMContentLoaded: "+post.metrics.domContentLoaded+"ms"}</span>}
+                            {post.metrics.firstPaint!=null&&<span>{"First Paint: "+post.metrics.firstPaint+"ms"}</span>}
+                            {post.metrics.largestContentfulPaint!=null&&<span>{"LCP: "+post.metrics.largestContentfulPaint+"ms"}</span>}
+                          </div>
+                        </div>}
+                      </div>
+                    </div>
                   </React.Fragment>;
                 })()}
 
@@ -929,6 +995,38 @@ function ResultsView(props) {
                         </div>}
                       </div>;
                     })}
+                    {/* Comparison Test Summary */}
+                    <div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                      <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Comparison Test Summary"}</div>
+                      <div style={{padding:"12px 16px",fontSize:10,color:T.txM,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"grid",gridTemplateColumns:"140px 1fr",gap:4}}>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Comparison Method:"}</span>
+                          <span>{"Pixel-level diff (pixelmatch) + DOM structural analysis"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Routes Compared:"}</span>
+                          <span>{maxRoutes+" routes"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Visual Match:"}</span>
+                          <span>{compData.visualScore!=null?compData.visualScore+"%":"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"DOM Similarity:"}</span>
+                          <span>{compData.domSimilarity!=null?compData.domSimilarity+"%":"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Functional Score:"}</span>
+                          <span>{compData.functionalScore!=null?compData.functionalScore+"%":"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Composite Score:"}</span>
+                          <span style={{fontWeight:700,color:compData.compositeScore>=80?T.g:compData.compositeScore>=60?T.y:T.r}}>{compData.compositeScore!=null?compData.compositeScore+"/100":"N/A"}</span>
+                        </div>
+                        {rrs.length>0&&<div style={{marginTop:4}}>
+                          <div style={{fontSize:9,fontWeight:700,color:T.txD,marginBottom:4}}>{"Per-Route Results"}</div>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:9}}>
+                            <thead><tr style={{background:T.cBg}}>{["Route","Match %","Verdict","Mismatched Px"].map(function(h,hi){return <th key={hi} style={{padding:"4px 8px",textAlign:"left",fontWeight:700,color:T.txD,borderBottom:"1px solid "+T.bdL}}>{h}</th>})}</tr></thead>
+                            <tbody>{rrs.map(function(rr,ri){return <tr key={ri} style={{borderBottom:"1px solid "+T.bdL}}>
+                              <td style={{padding:"4px 8px",fontFamily:T.f}}>{rr.route||"/"}</td>
+                              <td style={{padding:"4px 8px",fontWeight:700,color:rr.matchPct>=90?T.g:rr.matchPct>=70?T.y:T.r}}>{rr.matchPct+"%"}</td>
+                              <td style={{padding:"4px 8px"}}><span style={{padding:"1px 6px",borderRadius:4,fontSize:8,fontWeight:700,background:rr.verdict==="PASS"?T.okBg:rr.verdict==="WARN"?T.warnBg:T.errBg,color:rr.verdict==="PASS"?T.g:rr.verdict==="WARN"?T.y:T.r}}>{rr.verdict}</span></td>
+                              <td style={{padding:"4px 8px",fontFamily:T.f}}>{(rr.mismatchPixels||0).toLocaleString()}</td>
+                            </tr>})}</tbody>
+                          </table>
+                        </div>}
+                      </div>
+                    </div>
                   </React.Fragment>;
                 })()}
               </div>
