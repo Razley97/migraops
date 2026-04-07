@@ -19,6 +19,8 @@ import healthRouter from './routes/health.js';
 import conversationRouter from './routes/conversation.js';
 import playwrightRouter from './routes/playwright.js';
 import { rateLimiter } from './middleware/rateLimit.js';
+import { requestId } from './middleware/requestId.js';
+import logger from './services/logger.js';
 
 dotenv.config();
 
@@ -46,6 +48,8 @@ app.use(cors({
   credentials: true,
 }));
 
+app.use(requestId);
+
 // Playwright router BEFORE global body limit — screenshots exceed 2mb
 app.use('/api/playwright', playwrightRouter);
 
@@ -69,7 +73,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // ═══ Error handler ═══
 app.use((err, req, res, next) => {
-  console.error(`[ERROR] ${err.message}`);
+  logger.error(err.message, { requestId: req.requestId, status: err.status || 500 });
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
   });
@@ -85,6 +89,7 @@ app.listen(PORT, () => {
   ║   API:  ${process.env.ANTHROPIC_API_KEY ? '✅ Configured' : '❌ Missing ANTHROPIC_API_KEY'}        ║
   ╚══════════════════════════════════════╝
   `);
+  logger.info('MigraOps Backend started', { port: PORT, env: process.env.NODE_ENV || 'development' });
 });
 
 export default app;

@@ -9,10 +9,29 @@
  */
 
 import { Router } from 'express';
+import { z } from 'zod';
 import sessionStore from '../services/sessionStore.js';
 import { streamChat, parseAnthropicStream } from '../services/claudeStream.js';
+import { validateBody } from '../middleware/validate.js';
 
 const router = Router();
+
+// ═══ Input validation ═══
+const createSessionSchema = z.object({
+  sourceLanguage: z.string().max(50).optional(),
+  sourceVersion: z.string().max(50).optional(),
+  targetLanguage: z.string().max(50).optional(),
+  targetVersion: z.string().max(50).optional(),
+  model: z.string().max(100).optional(),
+  files: z.array(z.object({
+    name: z.string().max(255),
+    content: z.string().max(500000),
+  })).max(50).optional(),
+}).passthrough();
+
+const messageSchema = z.object({
+  content: z.string().min(1).max(100000),
+});
 
 // ═══ Helpers ═══
 
@@ -73,7 +92,7 @@ function extractProposals(text) {
 
 // ═══ POST /api/conversation — Create session ═══
 
-router.post('/', (req, res) => {
+router.post('/', validateBody(createSessionSchema), (req, res) => {
   try {
     const { sourceLanguage, sourceVersion, targetLanguage, targetVersion, model, files } = req.body || {};
     const session = sessionStore.create({ sourceLanguage, sourceVersion, targetLanguage, targetVersion, model, files });
@@ -89,7 +108,7 @@ router.post('/', (req, res) => {
 
 // ═══ POST /api/conversation/:id/message — Send message with SSE streaming ═══
 
-router.post('/:id/message', async (req, res) => {
+router.post('/:id/message', validateBody(messageSchema), async (req, res) => {
   const { id } = req.params;
   const { content } = req.body || {};
 
