@@ -180,11 +180,11 @@ export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid,opts) {
     if (chainOpts.useChain) {
       var secSys="Review the following codebase analysis for SECURITY concerns in the "+sn+" "+sv+" to "+tn+" "+tv+" migration. Identify: hardcoded secrets, injection vulnerabilities, insecure API usage, dependency risks. Enrich the analysis JSON by adding securityNotes per file and a top-level securityRisks array. Return the COMPLETE enriched JSON.";
       txt=await callAgentChain([
-        {agentId:'architect',sys:sys,usr:usr,mid:mid,mt:4000,opts:{timeout:120000,retries:0}},
-        {agentId:'security',sys:secSys,usr:'Review and enrich the analysis above. Return enriched JSON only.',mid:mid,mt:3000,opts:{timeout:120000,retries:0}}
+        {agentId:'architect',sys:sys,usr:usr,mid:mid,mt:8000,opts:{timeout:120000,retries:1}},
+        {agentId:'security',sys:secSys,usr:'Review and enrich the analysis above. Return enriched JSON only.',mid:mid,mt:6000,opts:{timeout:120000,retries:1}}
       ],chainOpts.onAgentChange);
     } else {
-      txt=await callAgent('codebaseAnalysis',sys,usr,mid,4000,{timeout:120000,retries:0});
+      txt=await callAgent('codebaseAnalysis',sys,usr,mid,8000,{timeout:120000,retries:1});
     }
     var cl=safeParseJSON(txt);
     if(!cl)throw new Error("Invalid JSON response");
