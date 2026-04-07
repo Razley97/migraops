@@ -43,6 +43,18 @@ describe('Agent Registry', function() {
     expect(agent.id).toBe('qa');
   });
 
+  it('getAgentForPhase returns qa for inlineQA', function() {
+    var agent = getAgentForPhase('inlineQA');
+    expect(agent).not.toBeNull();
+    expect(agent.id).toBe('qa');
+  });
+
+  it('getAgentForPhase returns security for securityAudit', function() {
+    var agent = getAgentForPhase('securityAudit');
+    expect(agent).not.toBeNull();
+    expect(agent.id).toBe('security');
+  });
+
   it('getAgentForPhase returns null for unknown phase', function() {
     var agent = getAgentForPhase('unknownPhase');
     expect(agent).toBeNull();

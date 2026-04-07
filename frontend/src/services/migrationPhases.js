@@ -297,6 +297,11 @@ export async function doMigrate(code,fn,sl,sv,tl,tv,mid,pr,cbCtx,alreadyMigrated
     planBlock+="\n\nEXECUTE THIS RECIPE PRECISELY. Apply EVERY change listed above. Do not skip any section.";
   }
 
+  // Inject QA feedback from inline QA validation (retry only)
+  if (filePlan&&filePlan.qaFeedback) {
+    planBlock+="\n\n=== QA VALIDATION FEEDBACK ===\nA QA agent reviewed your previous migration attempt and found issues. Address ALL of the following:\n"+filePlan.qaFeedback+"\n=== END QA FEEDBACK ===\n\nFix every issue listed above. The QA agent will re-validate after this attempt.";
+  }
+
   // Cross-language: add file mapping, module system, AND paradigm mapping instructions
   var crossBlock="";
   if (isCross&&allFileMap) {

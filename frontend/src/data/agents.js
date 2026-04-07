@@ -42,7 +42,7 @@ You write production-quality migrated code that follows target language conventi
 - Regression detection and scoring
 
 You validate that migrated code maintains functional equivalence with the source.`,
-    phases: ['integrationCheck', 'deepAnalysis', 'review'],
+    phases: ['integrationCheck', 'deepAnalysis', 'review', 'inlineQA'],
   },
   security: {
     id: 'security',
@@ -56,7 +56,7 @@ You validate that migrated code maintains functional equivalence with the source
 - Dependency security assessment
 
 You review migrated code for security implications and ensure no vulnerabilities are introduced during migration.`,
-    phases: ['securityReview'],
+    phases: ['securityReview', 'securityAudit'],
   },
   reviewer: {
     id: 'reviewer',
