@@ -193,7 +193,7 @@ export default function MigratingView(props) {
                 {/* Active file chip — what's being processed RIGHT NOW */}
                 {activeFile&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"5px 10px",borderRadius:8,background:activeFile.st==="planning"?T.blP:T.blM,border:"1px solid "+(activeFile.st==="planning"?"#c4b5fd":T.blP)}}>
                   <div style={{width:7,height:7,borderRadius:"50%",background:activeFile.st==="planning"?"#7c3aed":T.bl,animation:"pulse 1.5s infinite",flexShrink:0}}/>
-                  <span style={{fontSize:8,fontWeight:700,color:activeFile.st==="planning"?"#7c3aed":T.bl,textTransform:"uppercase",letterSpacing:.5}}>{activeFile.st==="planning"?t.mgPlanning:t.mgActive}</span>
+                  <span style={{fontSize:8,fontWeight:700,color:activeFile.st==="planning"?"#7c3aed":activeFile.st==="qa-validating"?"#6366f1":activeFile.st==="qa-passed"?"#10b981":activeFile.st==="qa-failed"||activeFile.st==="re-migrating"?"#f59e0b":T.bl,textTransform:"uppercase",letterSpacing:.5}}>{activeFile.st==="planning"?t.mgPlanning:activeFile.st==="qa-validating"?"QA Validando":activeFile.st==="qa-passed"?"QA Aprobado":activeFile.st==="qa-failed"?"QA Failed":activeFile.st==="re-migrating"?"Re-migrando":t.mgActive}</span>
                   <span style={{fontFamily:T.f,fontSize:10,fontWeight:600,color:T.nv,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{activeFile.file}</span>
                   {activeFile.targetFile&&activeFile.targetFile!==activeFile.file&&<span style={{color:T.bl,fontSize:8,flexShrink:0}}>{"→ "+activeFile.targetFile}</span>}
                   {activeFile.st==="migrating"&&activeFile.planOk!==undefined&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:4,background:activeFile.planOk?"#f0fdf4":"#fffbeb",color:activeFile.planOk?T.g:"#92400e",fontWeight:700}}>{activeFile.planOk?(activeFile.planChanges||0)+" changes":"⚡ sin plan"}</span>}
@@ -292,12 +292,13 @@ export default function MigratingView(props) {
                 var isDone=l.st==="done"||l.st==="checked"||l.st==="fixed";
                 var isErr=l.phase==="rollback"||l.phase==="stall"||l.phase==="cancelled";
                 // Consolidation sub-phase labels
-                var subLabel=l.subPhase==="audit"?t.gPhB2a:l.subPhase==="fix"?t.gPhB2b:null;
+                var subLabel=l.subPhase==="audit"?t.gPhB2a:l.subPhase==="fix"?t.gPhB2b:l.subPhase==="security"?"Security Audit":null;
                 var displayLabel=subLabel||phI.l;
                 // Consolidation sub-phase metrics
                 var subMeta="";
                 if (l.subPhase==="audit"&&isDone) subMeta=l.connections+" "+t.pConns+(l.broken>0?" · "+l.broken+" "+t.pBroken:"")+(l.issues>0?" · "+l.issues+" "+t.pIssues:"");
                 if (l.subPhase==="fix"&&isDone) subMeta=(l.fixed||0)+" fixed"+(l.fixes?" · "+(l.fixes||0)+" "+t.pIssues:"");
+                if (l.subPhase==="security"&&isDone) subMeta=(l.findings||0)+" findings";
                 return <div key={i} style={{padding:"4px 14px",borderBottom:"1px solid "+T.bdL,display:"flex",alignItems:"center",gap:6,fontSize:9,background:isErr?T.errBg+"80":"transparent"}}>
                   <span style={{fontSize:10}}>{isDone?"✅":isErr?"⚠️":l.subPhase?"↳":phI.ic}</span>
                   <span style={{fontWeight:600,color:isErr?T.r:l.subPhase?T.txM:T.nv,flex:1,fontSize:l.subPhase?8:9}}>{displayLabel}{l.iter?" #"+l.iter:""}</span>
@@ -581,6 +582,7 @@ export default function MigratingView(props) {
               {files.map(function(f,fi){
                 var fLog=fileLogs.find(function(l){return l.file===f.name});
                 var isDone=fLog&&fLog.st==="done";
+                var isQA=fLog&&(fLog.st==="qa-validating"||fLog.st==="qa-passed"||fLog.st==="qa-failed"||fLog.st==="re-migrating");
                 var isActive=fLog&&fLog.st!=="done"&&fLog;
                 var isPending=!fLog;
                 var dur=isDone&&fLog.durationMs?fmtMs(fLog.durationMs):"";
@@ -589,6 +591,7 @@ export default function MigratingView(props) {
                 var langDef=f.lang?LANGS[f.lang]:null;
                 var tgtLangDef=tL?LANGS[tL]:null;
                 var hasPreview=isDone&&fLog.preview&&fLog.preview.length>0;
+                var qaStColor=fLog&&fLog.st==="qa-validating"?"#6366f1":fLog&&fLog.st==="qa-passed"?"#10b981":fLog&&(fLog.st==="qa-failed"||fLog.st==="re-migrating")?"#f59e0b":null;
                 return <div key={fi}>
                   <div style={{padding:"5px 14px",borderBottom:hasPreview?"none":"1px solid "+T.bdL,display:"flex",alignItems:"center",gap:8,background:isActive?T.blM:isDone?T.okBg+"40":"transparent",transition:"background .3s"}}>
                     {/* Status node */}
@@ -603,6 +606,12 @@ export default function MigratingView(props) {
                         {tgtName&&tgtLangDef&&<span style={{fontSize:7,color:T.bl}}>{"→ "+tgtLangDef.i+" "+tgtName}</span>}
                       </div>
                       {isPending&&<div style={{fontSize:7,color:T.txD,fontStyle:"italic"}}>{t.mgPending+" · "+lc+" "+t.lines}</div>}
+                      {isQA&&<div style={{fontSize:7,fontWeight:700,color:qaStColor,display:"flex",alignItems:"center",gap:3}}>
+                        {fLog.st==="qa-validating"&&<span>{"QA validando..."}</span>}
+                        {fLog.st==="qa-passed"&&<span>{"QA aprobado ("+(fLog.qaScore||0)+"/100)"}</span>}
+                        {fLog.st==="qa-failed"&&<span>{"QA: "+(fLog.qaIssues||0)+" issues encontrados"}</span>}
+                        {fLog.st==="re-migrating"&&<span>{"Re-migrando con feedback QA..."}</span>}
+                      </div>}
                     </div>
                     {/* Right metrics */}
                     <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>

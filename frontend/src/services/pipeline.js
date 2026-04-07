@@ -4,6 +4,9 @@ import { mkDiff, mkRisks } from "./utils.js";
 import { runVirtualQA, compareVirtualQA } from "./qaHelpers.js";
 import { calcCapacity, resetTks, _tks, _activeController, setCancelled as setClaudeCancelled, setActiveController as setClaudeController } from "./claudeClient.js";
 import { doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation, doIntegrationCheck, doIntegrationFix, mapTargetFile } from "./migrationPhases.js";
+import { shouldRunInlineQA, shouldRunSecurityAudit, isFreeProvider } from "./budgetTier.js";
+import { doInlineQA, formatQAFeedback } from "./inlineQA.js";
+import { doSecurityAudit } from "./securityAuditPhase.js";
 
 // ══════════════════════════════════════════════════════════════
 // MigraOps Pipeline — Extensible migration engine
@@ -27,7 +30,7 @@ export function getRegisteredPhases() {
 }
 
 // ── Free-tier resilience helpers ──
-function isFreeProvider(mid) { return mid && (mid.startsWith("gemini") || mid.startsWith("llama") || mid.startsWith("gemma") || mid.startsWith("mixtral")); }
+// isFreeProvider imported from budgetTier.js (single source of truth)
 
 async function wrapPhase(fn, phaseName, emit, isFree) {
   try { return await fn(); }
@@ -286,6 +289,46 @@ export async function runMigration(config, emit) {
       var d = mkDiff(f.content, r.migrated);
       rs.push(Object.assign({}, f, r, { diff: d, targetName: targetFN, targetPath: targetPath, isCross: isCross }));
 
+      // ── Inline QA validation (full tier only) ──
+      if (shouldRunInlineQA(mod) && r.engine !== "fallback" && !emit.cancelRef.current) {
+        emit.setActiveAgent("qa");
+        emit.setLogs(function(p) { return p.map(function(l) {
+          if (l.file !== thisName || l.type !== "file") return l;
+          return Object.assign({}, l, { st: "qa-validating" });
+        }); });
+        audit.apiCalls++;
+        var qaResult = await wrapPhase(function() { return doInlineQA(f.content, r.migrated, thisName, targetFN, filePlan, sL, sV, tL, tV, mod, cap); }, "B-inlineQA-" + thisName, emit, false);
+        if (qaResult && qaResult.ok && !qaResult.skipped) {
+          if (qaResult.pass) {
+            emit.setLogs(function(p) { return p.map(function(l) {
+              if (l.file !== thisName || l.type !== "file") return l;
+              return Object.assign({}, l, { st: "qa-passed", qaScore: qaResult.score });
+            }); });
+          } else {
+            emit.setLogs(function(p) { return p.map(function(l) {
+              if (l.file !== thisName || l.type !== "file") return l;
+              return Object.assign({}, l, { st: "qa-failed", qaScore: qaResult.score, qaIssues: (qaResult.issues || []).length });
+            }); });
+            // Re-migrate with QA feedback
+            if (qaResult.issues && qaResult.issues.length > 0 && !emit.cancelRef.current) {
+              emit.setActiveAgent("developer");
+              emit.setLogs(function(p) { return p.map(function(l) {
+                if (l.file !== thisName || l.type !== "file") return l;
+                return Object.assign({}, l, { st: "re-migrating" });
+              }); });
+              audit.apiCalls++;
+              var qaFeedbackStr = formatQAFeedback(qaResult);
+              var r2 = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null,
+                Object.assign({}, filePlan, { qaFeedback: qaFeedbackStr }), cap);
+              var d2 = mkDiff(f.content, r2.migrated);
+              rs[rs.length - 1] = Object.assign({}, f, r2, { diff: d2, targetName: targetFN, targetPath: targetPath, isCross: isCross, qaRetried: true });
+              r = r2;
+            }
+          }
+        }
+        emit.setActiveAgent("developer");
+      }
+
       // Handle multi-file output: add additional files to results
       if (r.additionalFiles && r.additionalFiles.length > 0) {
         r.additionalFiles.forEach(function(af) {
@@ -368,6 +411,34 @@ export async function runMigration(config, emit) {
       var auditBroken = depAudit.ok && depAudit.audit ? (depAudit.audit.connections || []).filter(function(c) { return !c.compatible; }).length : 0;
       phaseEnd(phB2a, "done", { issues: auditIssues, connections: auditConns, broken: auditBroken });
       emit.setLogs(function(p) { return p.map(function(l) { return l.subPhase === "audit" && l.type === "phase" ? Object.assign({}, l, { st: "done", issues: auditIssues, connections: auditConns, broken: auditBroken, durationMs: Date.now() - l.ts }) : l; }); });
+
+      // B2-security: Security Audit (full tier only)
+      if (shouldRunSecurityAudit(mod) && depAudit.ok && !emit.cancelRef.current) {
+        emit.setActiveAgent("security");
+        var phSec = phaseStart(audit, "B2-sec", "Security Audit", { fileCount: fc });
+        emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "consolidation", subPhase: "security", st: "run", ts: Date.now(), label: "Security audit..." }]); });
+        audit.apiCalls++;
+        var secResult = await wrapPhase(function() { return doSecurityAudit(orderedFiles, rs, sL, sV, tL, tV, mod); }, "B2-security", emit, false);
+        if (secResult && secResult.ok && secResult.findings && secResult.findings.length > 0) {
+          // Merge security findings into depAudit issues
+          if (!depAudit.audit) depAudit.audit = { issues: [], connections: [] };
+          if (!depAudit.audit.issues) depAudit.audit.issues = [];
+          secResult.findings.forEach(function(finding) {
+            depAudit.audit.issues.push({
+              files: [finding.file],
+              type: "security_" + finding.category,
+              detail: "[" + finding.severity.toUpperCase() + "] " + finding.detail,
+              fix: finding.fix
+            });
+          });
+          auditIssues = depAudit.audit.issues.length;
+        }
+        var secFindings = secResult && secResult.findings ? secResult.findings.length : 0;
+        var secOk = secResult && secResult.ok;
+        phaseEnd(phSec, secOk ? "done" : "error", { findings: secFindings, ok: secOk });
+        emit.setLogs(function(p) { return p.map(function(l) { return l.subPhase === "security" && l.type === "phase" ? Object.assign({}, l, { st: secOk ? "done" : "error", findings: secFindings, durationMs: Date.now() - l.ts }) : l; }); });
+        emit.setActiveAgent("developer");
+      }
 
       // B2b: Consolidation Fix
       var phB2b = phaseStart(audit, "B2b", "Consolidation Fix", { fileCount: fc, auditIssues: auditIssues });
