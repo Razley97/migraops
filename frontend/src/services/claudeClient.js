@@ -11,10 +11,40 @@ export function setCancelled(v) { _cancelled = v; }
 export function setActiveController(v) { _activeController = v; }
 export function resetTks() { _tks = {i:0,o:0,calls:0,last:{i:0,o:0}}; }
 
+// ═══ Client-side rate limiter for free-tier providers ═══
+var _lastCallMs = 0;
+var PROVIDER_THROTTLE = {
+  gemini: 4500,   // 15 RPM = 1 call per 4s, with margin
+  groq: 2200,     // 30 RPM = 1 call per 2s, with margin
+  deepseek: 500,  // cheap, light throttle
+  anthropic: 0    // paid, no throttle
+};
+
+function getProviderFromModel(mid) {
+  if (!mid) return "anthropic";
+  if (mid.startsWith("deepseek")) return "deepseek";
+  if (mid.startsWith("gemini")) return "gemini";
+  if (mid.startsWith("llama") || mid.startsWith("gemma") || mid.startsWith("mixtral")) return "groq";
+  return "anthropic";
+}
+
+async function throttle(mid) {
+  var provider = getProviderFromModel(mid);
+  var minGap = PROVIDER_THROTTLE[provider] || 0;
+  if (minGap <= 0) return;
+  var now = Date.now();
+  var elapsed = now - _lastCallMs;
+  if (elapsed < minGap) {
+    await new Promise(function(ok) { setTimeout(ok, minGap - elapsed); });
+  }
+  _lastCallMs = Date.now();
+}
+
 export async function callClaude(sys,usr,mid,mt,opts) {
   var o=opts||{};
   if (_cancelled) throw new Error("Migration cancelled");
-  var maxRetries=o.retries!==undefined?o.retries:1;
+  var isFreeProvider=mid&&(mid.startsWith("gemini")||mid.startsWith("llama")||mid.startsWith("gemma")||mid.startsWith("mixtral"));
+  var maxRetries=o.retries!==undefined?o.retries:(isFreeProvider?3:1);
   var isSlowProvider=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini-2.5"));
   var timeout=o.timeout||(isSlowProvider?120000:60000);
   for (var attempt=0;attempt<=maxRetries;attempt++) {
@@ -24,15 +54,16 @@ export async function callClaude(sys,usr,mid,mt,opts) {
     _activeController=controller; // expose so cancel button can abort
     var timer=setTimeout(function(){controller.abort()},timeout);
     try {
+      await throttle(mid);
       var r = await fetch("/api/migrate",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||defaultMt,system:sys,messages:[{role:"user",content:usr}],provider:mid?(mid.startsWith("deepseek")?"deepseek":mid.startsWith("gemini")?"gemini":(mid.startsWith("llama")||mid.startsWith("gemma")||mid.startsWith("mixtral"))?"groq":"anthropic"):"anthropic"}),
+        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||defaultMt,system:sys,messages:[{role:"user",content:usr}],provider:getProviderFromModel(mid)}),
         signal:controller.signal
       });
       clearTimeout(timer);
       _activeController=null;
       if (_cancelled) throw new Error("Migration cancelled");
-      if (r.status===429||r.status===529||r.status===503) { if(attempt<maxRetries){var backoff=r.status===429?Math.min(15000,3000*Math.pow(2,attempt)):2000;await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
+      if (r.status===429||r.status===529||r.status===503) { if(attempt<maxRetries){var baseBack=isFreeProvider?8000:3000;var maxBack=isFreeProvider?65000:15000;var backoff=r.status===429?Math.min(maxBack,baseBack*Math.pow(2,attempt)):2000;console.log("[Rate Limit] "+getProviderFromModel(mid)+" 429 — waiting "+Math.round(backoff/1000)+"s (attempt "+(attempt+1)+"/"+maxRetries+")");await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
       if (!r.ok) throw new Error("API "+r.status);
       var d = await r.json();
       if (d.usage) { _tks.i+=(d.usage.input_tokens||0); _tks.o+=(d.usage.output_tokens||0); _tks.calls++; _tks.last={i:d.usage.input_tokens||0,o:d.usage.output_tokens||0}; }
