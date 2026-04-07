@@ -15,17 +15,18 @@ export async function callClaude(sys,usr,mid,mt,opts) {
   var o=opts||{};
   if (_cancelled) throw new Error("Migration cancelled");
   var maxRetries=o.retries!==undefined?o.retries:1;
-  var timeout=o.timeout||(mid&&mid.startsWith("deepseek")?120000:60000);
+  var isSlowProvider=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini-2.5"));
+  var timeout=o.timeout||(isSlowProvider?120000:60000);
   for (var attempt=0;attempt<=maxRetries;attempt++) {
     if (_cancelled) throw new Error("Migration cancelled");
-    var defaultMt=mid&&mid.startsWith("deepseek")?8000:4000;
+    var defaultMt=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini"))?8000:4000;
     var controller=new AbortController();
     _activeController=controller; // expose so cancel button can abort
     var timer=setTimeout(function(){controller.abort()},timeout);
     try {
       var r = await fetch("/api/migrate",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||defaultMt,system:sys,messages:[{role:"user",content:usr}],provider:mid&&mid.startsWith("deepseek")?"deepseek":"anthropic"}),
+        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||defaultMt,system:sys,messages:[{role:"user",content:usr}],provider:mid?(mid.startsWith("deepseek")?"deepseek":mid.startsWith("gemini")?"gemini":(mid.startsWith("llama")||mid.startsWith("gemma")||mid.startsWith("mixtral"))?"groq":"anthropic"):"anthropic"}),
         signal:controller.signal
       });
       clearTimeout(timer);

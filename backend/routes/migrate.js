@@ -1,5 +1,5 @@
 /**
- * Migration Route — Proxies requests to AI providers (Anthropic, DeepSeek)
+ * Migration Route — Proxies requests to AI providers (Anthropic, DeepSeek, Google Gemini, Groq)
  * Keeps API keys secure on the server side
  */
 
@@ -52,15 +52,71 @@ const PROVIDERS = {
       };
     },
   },
+  gemini: {
+    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    getHeaders: (apiKey) => ({
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    }),
+    buildBody: ({ model, max_tokens, system, messages }) => ({
+      model: model || 'gemini-2.0-flash',
+      max_tokens: max_tokens || 8192,
+      messages: [
+        { role: 'system', content: (system || '') + SECURITY_FOOTER },
+        ...(messages || []),
+      ],
+    }),
+    normalizeResponse: (data) => {
+      const choice = data.choices?.[0];
+      return {
+        content: [{ type: 'text', text: choice?.message?.content || '' }],
+        usage: {
+          input_tokens: data.usage?.prompt_tokens || 0,
+          output_tokens: data.usage?.completion_tokens || 0,
+        },
+        stop_reason: choice?.finish_reason === 'stop' ? 'end_turn' : choice?.finish_reason || 'end_turn',
+      };
+    },
+  },
+  groq: {
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    getHeaders: (apiKey) => ({
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    }),
+    buildBody: ({ model, max_tokens, system, messages }) => ({
+      model: model || 'llama-3.3-70b-versatile',
+      max_tokens: max_tokens || 4096,
+      messages: [
+        { role: 'system', content: (system || '') + SECURITY_FOOTER },
+        ...(messages || []),
+      ],
+    }),
+    normalizeResponse: (data) => {
+      const choice = data.choices?.[0];
+      return {
+        content: [{ type: 'text', text: choice?.message?.content || '' }],
+        usage: {
+          input_tokens: data.usage?.prompt_tokens || 0,
+          output_tokens: data.usage?.completion_tokens || 0,
+        },
+        stop_reason: choice?.finish_reason === 'stop' ? 'end_turn' : choice?.finish_reason || 'end_turn',
+      };
+    },
+  },
 };
 
 function getProviderFromModel(model) {
   if (model && model.startsWith('deepseek')) return 'deepseek';
+  if (model && model.startsWith('gemini')) return 'gemini';
+  if (model && (model.startsWith('llama') || model.startsWith('gemma') || model.startsWith('mixtral'))) return 'groq';
   return 'anthropic';
 }
 
 function getApiKey(provider) {
   if (provider === 'deepseek') return process.env.DEEPSEEK_API_KEY;
+  if (provider === 'gemini') return process.env.GEMINI_API_KEY;
+  if (provider === 'groq') return process.env.GROQ_API_KEY;
   return process.env.ANTHROPIC_API_KEY;
 }
 
