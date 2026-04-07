@@ -183,11 +183,14 @@ export async function runMigration(config, emit) {
     emit.setProg(2);
     var phA = phaseStart(audit, "A", "Codebase Analysis");
     audit.apiCalls++;
-    var cbCtx = await doCodebaseAnalysis(files, sL, sV, tL, tV, mod, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } });
+    var cbCtx = await wrapPhase(function() { return doCodebaseAnalysis(files, sL, sV, tL, tV, mod, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "A-analysis", emit, isFreeProvider(mod));
+    if (cbCtx.skipped) cbCtx = { ok: false, error: "Analysis skipped (rate limit)", analysis: {}, isCross: sL !== tL };
     phaseEnd(phA, cbCtx.ok ? "done" : "error", { detail: cbCtx.ok ? (cbCtx.analysis.purpose || "OK") : "Error", ok: cbCtx.ok });
     emit.setCbA(cbCtx);
     emit.setLogs(function(p) { return p.map(function(l) { return l.phase === "analysis" ? Object.assign({}, l, { st: "done", detail: cbCtx.ok ? (cbCtx.analysis.purpose || "") : "Error", durationMs: Date.now() - l.ts }) : l; }); });
     emit.setProg(W.a);
+    // Cooldown after analysis for free-tier — let rate limit reset before per-file work
+    if (!cbCtx.ok && isFreeProvider(mod)) { await freeTierCooldown(mod, emit, "post-analysis-recovery"); }
 
     // ═══ GATE: Post-Analysis ═══
     if (!emit.cancelRef.current) {
@@ -318,6 +321,9 @@ export async function runMigration(config, emit) {
       }); });
       emit.setProg(Math.round(W.a + W.b * ((fileIdx + 1) / fc)));
       emit.setRes(rs.slice());
+
+      // Inter-file cooldown for free-tier — avoid 429 between files
+      if (fileIdx < fc - 1 && isFreeProvider(mod)) { await freeTierCooldown(mod, emit, "between-files"); }
 
       // ═══ GATE: Post-File ═══
       if (!emit.cancelRef.current && emit.gateResolveRef.current !== "skip") {
