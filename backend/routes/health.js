@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { sessionStore } from '../services/sessionStore.js';
+import sessionStore from '../services/sessionStore.js';
 
 const router = Router();
 const startedAt = Date.now();
