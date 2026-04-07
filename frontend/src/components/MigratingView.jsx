@@ -482,7 +482,19 @@ export default function MigratingView(props) {
                           <span style={{fontSize:10,fontWeight:700,color:T.nv,flex:1}}>{qt.description}</span>
                           <span style={{padding:"2px 8px",borderRadius:4,fontSize:8,fontWeight:800,background:stBg,color:stColor,textTransform:"uppercase"}}>{qt.status}</span>
                         </div>
-                        <div style={{fontSize:9,color:T.txM,marginBottom:qt.screenshots&&qt.screenshots.length>0?8:0}}>{qt.findings}</div>
+                        <div style={{fontSize:9,color:T.txM,marginBottom:qt.meta||qt.screenshots&&qt.screenshots.length>0?8:0}}>{qt.findings}</div>
+                        {qt.meta&&qt.status==="warn"&&<div style={{background:"rgba(217,119,6,0.08)",border:"1px solid rgba(217,119,6,0.2)",borderRadius:6,padding:"8px 10px",marginBottom:8,fontSize:9}}>
+                          {qt.meta.detail&&<div style={{color:"#FBBF24",fontWeight:700,marginBottom:4}}>{qt.meta.detail}</div>}
+                          {qt.meta.errors&&qt.meta.errors.length>0&&<div style={{marginBottom:4}}>
+                            <div style={{color:T.txD,fontWeight:600,marginBottom:2}}>{"Errores encontrados:"}</div>
+                            {qt.meta.errors.map(function(err,ei){return <div key={ei} style={{color:T.txM,padding:"2px 0 2px 8px",borderLeft:"2px solid rgba(217,119,6,0.3)",marginBottom:2,fontFamily:"monospace",fontSize:8,wordBreak:"break-all"}}>{err}</div>})}
+                          </div>}
+                          {qt.meta.culprits&&qt.meta.culprits.length>0&&<div style={{marginBottom:4}}>
+                            <div style={{color:T.txD,fontWeight:600,marginBottom:2}}>{"Elementos que causan overflow:"}</div>
+                            {qt.meta.culprits.map(function(c,ci){return <div key={ci} style={{color:T.txM,padding:"2px 0 2px 8px",borderLeft:"2px solid rgba(217,119,6,0.3)",marginBottom:2,fontSize:8}}><span style={{fontFamily:"monospace",color:"#FBBF24"}}>{c.selector}</span>{" \u2014 ancho: "+c.width+"px, overflow: "+c.overflow+"px"}</div>})}
+                          </div>}
+                          {qt.meta.recommendation&&<div style={{color:"#93C5FD",fontWeight:600,marginTop:4,padding:"4px 8px",background:"rgba(59,130,246,0.08)",borderRadius:4}}>{"\uD83D\uDCA1 "+qt.meta.recommendation}</div>}
+                        </div>}
                         {qt.screenshots&&qt.screenshots.length>0&&<div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
                           {qt.screenshots.map(function(ss,si){
                             return ss.png?<div key={si} onClick={function(){setExpandedImg({src:"data:image/png;base64,"+ss.png,alt:qt.description+" \u2014 "+ss.stage})}} style={{flexShrink:0,borderRadius:6,border:"1px solid "+T.bdL,overflow:"hidden",cursor:"zoom-in"}}>

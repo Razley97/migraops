@@ -405,8 +405,8 @@ async function runInteractiveTests(page, baseUrl, viewport) {
   }
 
   // Helper: add test result
-  function addTest(category, description, element, status, findings, screenshots) {
-    tests.push({
+  function addTest(category, description, element, status, findings, screenshots, meta) {
+    var entry = {
       id: 'qa-' + (++testId),
       category: category,
       description: description,
@@ -414,7 +414,9 @@ async function runInteractiveTests(page, baseUrl, viewport) {
       status: status,
       findings: findings || '',
       screenshots: screenshots || []
-    });
+    };
+    if (meta) entry.meta = meta;
+    tests.push(entry);
   }
 
   // ── TEST 1: Page Load ──
@@ -435,8 +437,17 @@ async function runInteractiveTests(page, baseUrl, viewport) {
   await page.waitForTimeout(500);
   addTest('console', 'No JavaScript console errors', 'console',
     consoleErrors.length === 0 ? 'pass' : 'warn',
-    consoleErrors.length === 0 ? 'No console errors detected' : consoleErrors.length + ' errors: ' + consoleErrors.slice(0, 3).join('; '),
-    []
+    consoleErrors.length === 0 ? 'No console errors detected' : consoleErrors.length + ' console error(s) detected',
+    [],
+    consoleErrors.length > 0 ? {
+      detail: 'Se encontraron ' + consoleErrors.length + ' errores en la consola del navegador. Estos errores pueden indicar problemas de runtime, dependencias faltantes, o incompatibilidades.',
+      errors: consoleErrors.slice(0, 10),
+      recommendation: consoleErrors.some(function(e) { return e.includes('404') || e.includes('Failed to load'); })
+        ? 'Verificar que todos los recursos (scripts, stylesheets, imágenes) están disponibles y las rutas son correctas.'
+        : consoleErrors.some(function(e) { return e.includes('TypeError') || e.includes('ReferenceError'); })
+        ? 'Revisar errores de JavaScript: posibles variables no definidas o tipos incorrectos tras la migración.'
+        : 'Revisar los errores en la consola para identificar la causa raíz.'
+    } : null
   );
 
   // ── TEST 3: Interactive Elements Discovery ──
@@ -575,15 +586,39 @@ async function runInteractiveTests(page, baseUrl, viewport) {
     await page.waitForTimeout(500);
     var mobileSnap = await snap('responsive-mobile');
 
-    // Check for horizontal overflow
-    var hasOverflow = await page.evaluate(function() {
-      return document.body.scrollWidth > window.innerWidth;
+    // Check for horizontal overflow with detail
+    var overflowInfo = await page.evaluate(function() {
+      var bodyW = document.body.scrollWidth;
+      var winW = window.innerWidth;
+      var hasOF = bodyW > winW;
+      var culprits = [];
+      if (hasOF) {
+        document.querySelectorAll('*').forEach(function(el) {
+          var rect = el.getBoundingClientRect();
+          if (rect.right > winW + 2 && culprits.length < 5) {
+            var tag = el.tagName.toLowerCase();
+            var id = el.id ? '#' + el.id : '';
+            var cls = el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : '';
+            culprits.push({ selector: tag + id + cls, width: Math.round(rect.width), overflow: Math.round(rect.right - winW) });
+          }
+        });
+      }
+      return { hasOverflow: hasOF, bodyWidth: bodyW, viewportWidth: winW, culprits: culprits };
     });
 
     addTest('responsive', 'Mobile viewport test (375x667)', 'viewport',
-      hasOverflow ? 'warn' : 'pass',
-      hasOverflow ? 'Horizontal overflow detected at mobile width' : 'Content adapts to mobile viewport',
-      [{ stage: 'mobile', png: mobileSnap }]
+      overflowInfo.hasOverflow ? 'warn' : 'pass',
+      overflowInfo.hasOverflow
+        ? 'Horizontal overflow: contenido ' + overflowInfo.bodyWidth + 'px excede viewport ' + overflowInfo.viewportWidth + 'px'
+        : 'Content adapts to mobile viewport',
+      [{ stage: 'mobile', png: mobileSnap }],
+      overflowInfo.hasOverflow ? {
+        detail: 'El contenido tiene un ancho de ' + overflowInfo.bodyWidth + 'px pero el viewport mobile es de ' + overflowInfo.viewportWidth + 'px. Esto causa scroll horizontal no deseado en dispositivos móviles.',
+        culprits: overflowInfo.culprits,
+        recommendation: overflowInfo.culprits.length > 0
+          ? 'Elementos que causan overflow: ' + overflowInfo.culprits.map(function(c) { return c.selector + ' (' + c.overflow + 'px fuera)'; }).join(', ') + '. Considerar usar max-width:100%, overflow-x:hidden, o media queries.'
+          : 'Usar CSS responsive (max-width:100%, flexbox, grid) para adaptar el layout a pantallas pequeñas.'
+      } : null
     );
 
     // Restore original viewport
