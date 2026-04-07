@@ -1,3 +1,4 @@
+import React,{useState} from "react";
 import { MODELS } from "../config/models.js";
 import { LANGS, MODULE_CONVENTIONS } from "../config/languages.js";
 import { AGENTS } from "../data/agents.js";
@@ -38,6 +39,9 @@ export default function MigratingView(props) {
   var pwPre=props.pwPre;
   var pwComparison=props.pwComparison;
   var visualQA=props.visualQA;
+  var expandedImgState = useState(null);
+  var expandedImg = expandedImgState[0];
+  var setExpandedImg = expandedImgState[1];
 
         void tick; // force re-render every 1s for live timers
         var now=Date.now();
@@ -312,13 +316,23 @@ export default function MigratingView(props) {
             var vd=vqa?vqa.verdict:null;
             var cd=vqa?vqa.comparison:(comp||null);
 
-            return <div style={Object.assign({},S.card,{overflow:"hidden"})}>
-              <div style={{padding:"8px 14px",background:"linear-gradient(135deg,#7C3AED,#8B5CF6)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            return <React.Fragment>
+            {/* Expanded image modal */}
+            {expandedImg&&<div onClick={function(){setExpandedImg(null)}} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.85)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out",padding:20}}>
+              <div style={{position:"relative",maxWidth:"95vw",maxHeight:"95vh"}}>
+                <img src={expandedImg.src} alt={expandedImg.alt||"Screenshot"} style={{maxWidth:"95vw",maxHeight:"90vh",borderRadius:8,border:"2px solid rgba(255,255,255,.2)"}}/>
+                <div style={{position:"absolute",top:-30,left:0,right:0,textAlign:"center",color:"#fff",fontSize:12,fontWeight:700}}>{expandedImg.alt||"Screenshot"}</div>
+                <div style={{position:"absolute",bottom:-28,left:0,right:0,textAlign:"center",color:"rgba(255,255,255,.5)",fontSize:10}}>{"Click anywhere to close"}</div>
+              </div>
+            </div>}
+
+            <div style={Object.assign({},S.card,{overflow:"hidden"})}>
+              <div style={{padding:"10px 14px",background:"linear-gradient(135deg,#7C3AED,#8B5CF6)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:14}}>{"📸"}</span>
+                  <span style={{fontSize:14}}>{"\uD83D\uDCF8"}</span>
                   <div>
-                    <div style={{fontSize:11,fontWeight:800}}>{"Visual QA"}</div>
-                    <div style={{fontSize:8,opacity:.7}}>{comp?"Pre + Post comparison":pre?"Pre-migration baseline captured":"Capturing..."}</div>
+                    <div style={{fontSize:12,fontWeight:800}}>{"Visual QA \u2014 Playwright Report"}</div>
+                    <div style={{fontSize:8,opacity:.7}}>{comp?"Pre + Post comparison complete":pre?"Pre-migration baseline captured":"Capturing..."}</div>
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -327,56 +341,83 @@ export default function MigratingView(props) {
                 </div>
               </div>
 
-              <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:10}}>
-                {/* ── Pre-migration screenshots thumbnails ── */}
-                {preScreenshots.length>0&&<div>
-                  <div style={{fontSize:9,fontWeight:700,color:T.txD,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{width:6,height:6,borderRadius:"50%",background:"#7C3AED"}}/>
-                    {"Pre-Migration · "+preScreenshots.length+" screenshot"+(preScreenshots.length>1?"s":"")}
+              <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:12}}>
+
+                {/* ── Test Methodology ── */}
+                <div style={{padding:"10px 14px",borderRadius:8,background:T.cBg,border:"1px solid "+T.bdL}}>
+                  <div style={{fontSize:10,fontWeight:700,color:T.nv,marginBottom:6}}>{"Test Methodology"}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"110px 1fr",gap:"3px 8px",fontSize:9,color:T.txM}}>
+                    <span style={{fontWeight:700,color:T.txD}}>{"Engine:"}</span>
+                    <span>{"Playwright (headless Chromium)"}</span>
+                    <span style={{fontWeight:700,color:T.txD}}>{"Viewport:"}</span>
+                    <span>{"1280\u00d7720px desktop"}</span>
+                    <span style={{fontWeight:700,color:T.txD}}>{"Comparison:"}</span>
+                    <span>{"Pixel diff (pixelmatch) + DOM structural analysis"}</span>
+                    <span style={{fontWeight:700,color:T.txD}}>{"Scoring:"}</span>
+                    <span>{"Visual 40% + DOM 25% + Functional 20% + Perf 10% + A11y 5%"}</span>
                   </div>
-                  <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+                </div>
+
+                {/* ── Pre-migration screenshots ── */}
+                {preScreenshots.length>0&&<div>
+                  <div style={{fontSize:10,fontWeight:700,color:T.txD,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:4}}>
+                    <span style={{width:6,height:6,borderRadius:"50%",background:"#7C3AED"}}/>
+                    {"Pre-Migration \u00b7 "+preScreenshots.length+" screenshot"+(preScreenshots.length>1?"s":"")+" captured"}
+                  </div>
+                  <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
                     {preScreenshots.map(function(ss,i){
-                      return <div key={i} style={{flexShrink:0,borderRadius:8,border:"1px solid "+T.bdL,overflow:"hidden",background:T.cBg}}>
-                        <img src={"data:image/png;base64,"+ss.png} alt={"Pre "+i} style={{width:160,height:100,objectFit:"cover",display:"block"}}/>
-                        <div style={{padding:"3px 6px",fontSize:7,color:T.txD,textAlign:"center"}}>{ss.route||"/"}</div>
+                      return <div key={i} onClick={function(){setExpandedImg({src:"data:image/png;base64,"+ss.png,alt:"Pre-Migration: "+(ss.route||"/")})}} style={{flexShrink:0,borderRadius:8,border:"2px solid "+T.bdL,overflow:"hidden",background:T.cBg,cursor:"zoom-in",transition:"transform .15s",position:"relative"}}>
+                        <img src={"data:image/png;base64,"+ss.png} alt={"Pre "+i} style={{width:220,height:140,objectFit:"cover",display:"block"}}/>
+                        <div style={{position:"absolute",top:4,right:4,padding:"1px 5px",borderRadius:4,background:"rgba(0,0,0,.6)",color:"#fff",fontSize:7,fontWeight:700}}>{"\uD83D\uDD0D Click to expand"}</div>
+                        <div style={{padding:"4px 8px",fontSize:8,color:T.txD,textAlign:"center",fontWeight:600}}>{ss.route||"/"}</div>
                       </div>
                     })}
                   </div>
                 </div>}
 
-                {/* ── Pre baseline metrics ── */}
-                {pre&&pre.ok&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  <div style={{padding:"4px 10px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL,fontSize:9}}>
-                    <span style={{color:T.txD}}>{"Routes: "}</span>
-                    <span style={{fontWeight:700,fontFamily:T.f,color:T.nv}}>{pre.routes?pre.routes.length:0}</span>
+                {/* ── Pre baseline detailed metrics ── */}
+                {pre&&pre.ok&&<div style={{borderRadius:8,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                  <div style={{padding:"6px 10px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:9,fontWeight:700,color:T.nv}}>{"Baseline Metrics"}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:0}}>
+                    {[
+                      {l:"Routes",v:pre.routes?pre.routes.length:0,c:T.bl},
+                      {l:"Load Time",v:pre.metrics&&pre.metrics.loadTime?pre.metrics.loadTime+"ms":"N/A",c:T.nv},
+                      {l:"JS Errors",v:pre.jsErrors?pre.jsErrors.length:0,c:pre.jsErrors&&pre.jsErrors.length>0?T.r:T.g},
+                      {l:"Capture",v:pre.durationMs?fmtMs(pre.durationMs):"N/A",c:T.nv}
+                    ].map(function(m,mi){
+                      return <div key={mi} style={{padding:"8px 6px",textAlign:"center",borderRight:mi<3?"1px solid "+T.bdL:"none"}}>
+                        <div style={{fontSize:7,fontWeight:700,color:T.txD,textTransform:"uppercase"}}>{m.l}</div>
+                        <div style={{fontSize:14,fontWeight:900,fontFamily:T.f,color:m.c,marginTop:2}}>{m.v}</div>
+                      </div>
+                    })}
                   </div>
-                  {pre.metrics&&pre.metrics.loadTime&&<div style={{padding:"4px 10px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL,fontSize:9}}>
-                    <span style={{color:T.txD}}>{"Load: "}</span>
-                    <span style={{fontWeight:700,fontFamily:T.f,color:T.nv}}>{pre.metrics.loadTime+"ms"}</span>
+                  {pre.domSummary&&<div style={{padding:"6px 10px",borderTop:"1px solid "+T.bdL,fontSize:9,color:T.txM}}>
+                    {"DOM: "+pre.domSummary.nodeCount+" nodes, "+pre.domSummary.uniqueTags+" unique tags"+(pre.domSummary.depth?", depth "+pre.domSummary.depth:"")}
                   </div>}
-                  {pre.jsErrors&&<div style={{padding:"4px 10px",borderRadius:6,background:pre.jsErrors.length>0?T.errBg:T.okBg,border:"1px solid "+(pre.jsErrors.length>0?T.errBd:T.okBd),fontSize:9}}>
-                    <span style={{color:pre.jsErrors.length>0?T.r:T.g,fontWeight:700}}>{"JS Errors: "+pre.jsErrors.length}</span>
+                  {pre.jsErrors&&pre.jsErrors.length>0&&<div style={{padding:"6px 10px",borderTop:"1px solid "+T.bdL,background:T.errBg}}>
+                    <div style={{fontSize:8,fontWeight:700,color:T.r,marginBottom:2}}>{"JS Errors Detected:"}</div>
+                    {pre.jsErrors.map(function(err,ei){return <div key={ei} style={{fontSize:8,color:T.r,fontFamily:T.f,marginBottom:1}}>{err}</div>})}
                   </div>}
-                  {pre.durationMs&&<div style={{padding:"4px 10px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL,fontSize:9}}>
-                    <span style={{color:T.txD}}>{"Capture: "}</span>
-                    <span style={{fontWeight:700,fontFamily:T.f,color:T.nv}}>{fmtMs(pre.durationMs)}</span>
+                  {pre.routes&&pre.routes.length>0&&<div style={{padding:"6px 10px",borderTop:"1px solid "+T.bdL,fontSize:9,color:T.txM}}>
+                    {"Routes tested: "+pre.routes.join(", ")}
                   </div>}
                 </div>}
 
-                {/* ── Post-migration diff thumbnails ── */}
+                {/* ── Post-migration diff screenshots ── */}
                 {postScreenshots.length>0&&<div>
-                  <div style={{fontSize:9,fontWeight:700,color:T.txD,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{fontSize:10,fontWeight:700,color:T.txD,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:4}}>
                     <span style={{width:6,height:6,borderRadius:"50%",background:"#2563EB"}}/>
-                    {"Post-Migration Diff · "+postScreenshots.length+" route"+(postScreenshots.length>1?"s":"")}
+                    {"Post-Migration Diff \u00b7 "+postScreenshots.length+" route"+(postScreenshots.length>1?"s":"")}
                   </div>
-                  <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+                  <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
                     {postScreenshots.map(function(di,i){
                       var mc=di.matchPct>=90?T.g:di.matchPct>=70?T.y:T.r;
-                      return <div key={i} style={{flexShrink:0,borderRadius:8,border:"1px solid "+T.bdL,overflow:"hidden",background:T.cBg}}>
-                        <img src={"data:image/png;base64,"+di.diff} alt={"Diff "+i} style={{width:160,height:100,objectFit:"cover",display:"block"}}/>
-                        <div style={{padding:"3px 6px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <span style={{fontSize:7,color:T.txD}}>{di.route||"/"}</span>
-                          <span style={{fontSize:8,fontWeight:800,color:mc,fontFamily:T.f}}>{di.matchPct+"%"}</span>
+                      return <div key={i} onClick={function(){setExpandedImg({src:"data:image/png;base64,"+di.diff,alt:"Diff: "+(di.route||"/")+" \u2014 "+di.matchPct+"% match"})}} style={{flexShrink:0,borderRadius:8,border:"2px solid "+T.bdL,overflow:"hidden",background:T.cBg,cursor:"zoom-in"}}>
+                        <img src={"data:image/png;base64,"+di.diff} alt={"Diff "+i} style={{width:220,height:140,objectFit:"cover",display:"block"}}/>
+                        <div style={{position:"absolute",top:4,right:4,padding:"1px 5px",borderRadius:4,background:"rgba(0,0,0,.6)",color:"#fff",fontSize:7,fontWeight:700}}>{"\uD83D\uDD0D Expand"}</div>
+                        <div style={{padding:"4px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:8,color:T.txD,fontWeight:600}}>{di.route||"/"}</span>
+                          <span style={{fontSize:9,fontWeight:900,color:mc,fontFamily:T.f}}>{di.matchPct+"%"}</span>
                         </div>
                       </div>
                     })}
@@ -385,7 +426,7 @@ export default function MigratingView(props) {
 
                 {/* ── QA Summary table ── */}
                 {cd&&<div style={{borderRadius:8,border:"1px solid "+T.bdL,overflow:"hidden"}}>
-                  <div style={{padding:"6px 10px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:9,fontWeight:700,color:T.nv}}>{"QA Summary"}</div>
+                  <div style={{padding:"6px 10px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:9,fontWeight:700,color:T.nv}}>{"QA Scoring Summary"}</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:0}}>
                     {[
                       {l:"Visual",v:cd.visualScore,w:"40%"},
@@ -409,12 +450,13 @@ export default function MigratingView(props) {
                     <span style={{fontSize:14,fontWeight:900,fontFamily:T.f,color:cd.compositeScore>=80?T.g:cd.compositeScore>=60?T.y:T.r}}>{cd.compositeScore+"/100"}</span>
                   </div>}
                   {vd&&<div style={{padding:"4px 10px",borderTop:"1px solid "+T.bdL,background:vd.overall==="PASS"?T.okBg:vd.overall==="WARN"?T.warnBg:T.errBg}}>
-                    <div style={{fontSize:8,fontWeight:700,color:vd.overall==="PASS"?T.g:vd.overall==="WARN"?T.y:T.r}}>{vd.overall+" — "+vd.notes}</div>
+                    <div style={{fontSize:8,fontWeight:700,color:vd.overall==="PASS"?T.g:vd.overall==="WARN"?T.y:T.r}}>{vd.overall+" \u2014 "+vd.notes}</div>
                     {vd.regressionAreas&&vd.regressionAreas.length>0&&<div style={{fontSize:7,color:T.txM,marginTop:1}}>{"Regressions: "+vd.regressionAreas.join(", ")}</div>}
                   </div>}
                 </div>}
               </div>
             </div>
+            </React.Fragment>
           })()}
 
           {/* ═══ FILE QUEUE — Detailed file status with expandable change preview ═══ */}
