@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch server.js",
+    "dev": "node --watch --watch-path=./server.js --watch-path=./routes --watch-path=./services --watch-path=./middleware server.js",
     "start": "node server.js"
   },
   "dependencies": {

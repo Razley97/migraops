@@ -25,6 +25,7 @@ function ResultsView(props) {
   var CodeLine=props.CodeLine;
   var pwComparison=props.pwComparison;
   var visualQA=props.visualQA;
+  var qaTests=props.qaTests;
 
   // Resolve screenshots from IndexedDB when visualQA report is available
   var resolvedVQAState = useState(null);
@@ -651,7 +652,7 @@ function ResultsView(props) {
       {/* RESULT TABS */}
       {res.length>0&&<div style={{maxWidth:1200,margin:"0 auto",padding:"0 24px 16px"}}>
         <div style={{display:"flex",gap:2,background:T.cBg,borderRadius:10,padding:3,border:"1px solid "+T.bdL,marginBottom:10}}>
-          {[{k:"code",l:"Código"},{k:"audit",l:"Auditoría"},{k:"visual",l:"Visual"},{k:"risks",l:"Riesgos"}].map(function(tb){return <button key={tb.k} onClick={function(){setResTab(tb.k)}} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:resTab===tb.k?700:500,background:resTab===tb.k?T.w:"transparent",color:resTab===tb.k?T.nv:T.txM,boxShadow:resTab===tb.k?"0 1px 3px rgba(0,0,0,.08)":"none",fontFamily:T.ui,transition:"all .2s"}}>{tb.l}</button>})}
+          {[{k:"code",l:"Código"},{k:"audit",l:"Auditoría"},{k:"visual",l:"Visual"},{k:"testing",l:"QA Tests"},{k:"risks",l:"Riesgos"}].map(function(tb){return <button key={tb.k} onClick={function(){setResTab(tb.k)}} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:resTab===tb.k?700:500,background:resTab===tb.k?T.w:"transparent",color:resTab===tb.k?T.nv:T.txM,boxShadow:resTab===tb.k?"0 1px 3px rgba(0,0,0,.08)":"none",fontFamily:T.ui,transition:"all .2s"}}>{tb.l}</button>})}
         </div>
         {resTab==="audit"&&auditTrail&&<div style={Object.assign({},S.card,{overflow:"hidden"})}>
           <div style={{padding:"14px 20px",background:"linear-gradient(135deg,#1E3A5F,#2D4A7A)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -930,6 +931,102 @@ function ResultsView(props) {
                     })}
                   </React.Fragment>;
                 })()}
+              </div>
+            </div>}
+          </div>;
+        })()}
+        {resTab==="testing"&&(function(){
+          var qd = qaTests;
+          var hasQA = !!(qd && (qd.pre || qd.post));
+
+          if (!hasQA) return <div style={{padding:40,textAlign:"center",color:T.txD}}>
+            <div style={{fontSize:32,marginBottom:8}}>{"\uD83E\uDDEA"}</div>
+            <div style={{fontSize:12}}>{"No QA test data available"}</div>
+            <div style={{fontSize:10,marginTop:4}}>{"QA tests run automatically during migration"}</div>
+          </div>;
+
+          var pre = qd.pre && qd.pre.ok ? qd.pre.virtual : null;
+          var post = qd.post && qd.post.ok ? qd.post.virtual : null;
+          var comp = qd.comparison;
+
+          return <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
+            {/* Summary banner */}
+            {comp&&<div style={{padding:"12px 16px",borderRadius:10,background:comp.preservationRate>=80?T.okBg:comp.preservationRate>=60?T.warnBg:T.errBg,border:"1px solid "+(comp.preservationRate>=80?T.okBd:comp.preservationRate>=60?T.warnBd:T.errBd),display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontSize:28,fontWeight:900,fontFamily:T.f,color:comp.preservationRate>=80?T.g:comp.preservationRate>=60?T.y:T.r}}>{comp.preservationRate+"%"}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.nv}}>{"Behavioral Preservation Rate"}</div>
+                <div style={{fontSize:9,color:T.txM}}>{"Equivalent: "+comp.summary.equivalent+" | Different: "+comp.summary.different+" | Missing: "+comp.summary.missing}</div>
+              </div>
+            </div>}
+
+            {/* Stats grid */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+              {[
+                {l:"Pre Tests",v:pre?pre.summary.totalTests:0,c:"#6366F1"},
+                {l:"Post Tests",v:post?post.summary.totalTests:0,c:"#8B5CF6"},
+                {l:"Bugs Found",v:(pre?pre.summary.bugsFound:0)+(post?post.summary.bugsFound:0),c:"#EF4444"},
+                {l:"High Confidence",v:post?post.summary.highConfidence:0,c:"#059669"}
+              ].map(function(m,mi){return <div key={mi} style={{padding:"12px 10px",borderRadius:10,background:T.cBg,border:"1px solid "+T.bdL,textAlign:"center"}}>
+                <div style={{fontSize:7,fontWeight:700,color:T.txD,textTransform:"uppercase"}}>{m.l}</div>
+                <div style={{fontSize:20,fontWeight:900,color:m.c,fontFamily:T.f,marginTop:2}}>{m.v}</div>
+              </div>})}
+            </div>
+
+            {/* Function-by-function comparison */}
+            {comp&&comp.comparisons&&<div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Function Comparison (Pre vs Post)"}</div>
+              <div style={{maxHeight:400,overflowY:"auto"}}>
+                {comp.comparisons.map(function(fn,fi){
+                  var statusColor = fn.status==="equivalent"?T.g:fn.status==="missing"?"#EF4444":"#D97706";
+                  return <div key={fi} style={{borderBottom:"1px solid "+T.bdL,padding:"10px 16px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                      <span style={{fontSize:11,fontWeight:700,color:T.nv}}>{fn.name}</span>
+                      <span style={{fontSize:9,color:T.txD}}>{fn.file}</span>
+                      <span style={{marginLeft:"auto",padding:"2px 8px",borderRadius:4,fontSize:9,fontWeight:700,background:fn.status==="equivalent"?T.okBg:fn.status==="missing"?T.errBg:T.warnBg,color:statusColor}}>{fn.status.toUpperCase()}</span>
+                    </div>
+                    {fn.cases&&fn.cases.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                      {fn.cases.map(function(c,ci){
+                        var cColor = c.status==="equivalent"?"#059669":c.status==="different"?"#D97706":"#EF4444";
+                        return <div key={ci} style={{padding:"3px 8px",borderRadius:4,fontSize:8,background:T.cBg,border:"1px solid "+T.bdL}} title={c.label}>
+                          <span style={{color:cColor,fontWeight:700}}>{c.status==="equivalent"?"\u2713":c.status==="different"?"\u0394":"\u2717"}</span>
+                          <span style={{marginLeft:4,color:T.txM}}>{c.label||("Case "+(ci+1))}</span>
+                        </div>
+                      })}
+                    </div>}
+                  </div>
+                })}
+              </div>
+            </div>}
+
+            {/* Function details — Post migration */}
+            {post&&post.functions&&<div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"QA Test Details (Post-Migration)"}</div>
+              <div style={{maxHeight:500,overflowY:"auto"}}>
+                {post.functions.map(function(fn,fi){
+                  return <div key={fi} style={{borderBottom:"1px solid "+T.bdL,padding:"12px 16px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <span style={{fontSize:12,fontWeight:800,color:T.nv}}>{fn.name}</span>
+                      <span style={{fontSize:9,color:T.txD}}>{fn.file}</span>
+                      <span style={{fontSize:8,padding:"1px 6px",borderRadius:3,background:T.blP,color:T.bl}}>{fn.returnType||"void"}</span>
+                    </div>
+                    <div style={{fontSize:9,color:T.txM,marginBottom:8}}>{fn.description}</div>
+                    {fn.tests&&fn.tests.map(function(t,ti){
+                      var confColor = t.confidence==="high"?"#059669":t.confidence==="medium"?"#D97706":"#EF4444";
+                      return <div key={ti} style={{marginBottom:6,padding:"8px 10px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                          <span style={{fontSize:9,fontWeight:700,color:T.nv}}>{t.label||("Test "+(ti+1))}</span>
+                          <span style={{marginLeft:"auto",fontSize:8,fontWeight:700,color:confColor}}>{t.confidence}</span>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:9}}>
+                          <div><span style={{color:T.txD}}>{"Input: "}</span><code style={{fontFamily:T.f,color:T.bl,fontSize:8}}>{typeof t.input==="string"?t.input.slice(0,80):JSON.stringify(t.input).slice(0,80)}</code></div>
+                          <div><span style={{color:T.txD}}>{"Predicted: "}</span><code style={{fontFamily:T.f,color:"#059669",fontSize:8}}>{typeof t.predicted==="string"?t.predicted.slice(0,80):JSON.stringify(t.predicted).slice(0,80)}</code></div>
+                        </div>
+                        {t.trace&&<div style={{marginTop:4,fontSize:8,color:T.txD,fontStyle:"italic"}}>{typeof t.trace==="string"?t.trace.slice(0,150):""}</div>}
+                        {t.bugs&&t.bugs!=="null"&&t.bugs!==null&&<div style={{marginTop:4,padding:"3px 6px",borderRadius:4,background:T.errBg,fontSize:8,color:T.r}}>{"Bug: "+t.bugs}</div>}
+                      </div>
+                    })}
+                  </div>
+                })}
               </div>
             </div>}
           </div>;

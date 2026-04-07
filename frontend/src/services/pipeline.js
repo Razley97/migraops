@@ -1,6 +1,7 @@
 import { LANGS } from "../config/languages.js";
 import { MODELS } from "../config/models.js";
 import { mkDiff, mkRisks } from "./utils.js";
+import { runVirtualQA, compareVirtualQA } from "./qaHelpers.js";
 import { calcCapacity, resetTks, _tks, _activeController, setCancelled as setClaudeCancelled, setActiveController as setClaudeController } from "./claudeClient.js";
 import { doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation, doIntegrationCheck, doIntegrationFix, mapTargetFile } from "./migrationPhases.js";
 
@@ -463,6 +464,54 @@ export async function runMigration(config, emit) {
         modifiedFiles: Object.keys(fixResult.files || {}),
         untouchedFiles: rs.filter(function(r) { return !(fixResult.files || {})[r.targetName || r.name] && !(fixResult.files || {})[r.name]; }).map(function(r) { return r.targetName || r.name; })
       };
+    }
+
+    // ═══ PHASE E: QA Testing — Virtual execution & comparison ═══
+    if (!emit.cancelRef.current) {
+      emit.setActiveAgent("qa");
+      emit.setMigPhase("qa-testing");
+      var phE = phaseStart(audit, "E", "QA Testing");
+      emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "qa-testing", st: "run", ts: Date.now(), label: "Running virtual QA tests..." }]); });
+
+      try {
+        // E1: Virtual QA on source code
+        var sourceFiles = files.map(function(f) { return { name: f.name, content: f.content }; });
+        var preVQA = await runVirtualQA(sourceFiles, sL, sV, mod, "pre");
+
+        // E2: Virtual QA on migrated code
+        var migratedFiles = rs.map(function(r) { return { name: r.targetName || r.name, content: r.migrated }; });
+        var postVQA = await runVirtualQA(migratedFiles, tL, tV, mod, "post");
+
+        // E3: Compare pre vs post
+        var vqaComparison = null;
+        if (preVQA.ok && postVQA.ok) {
+          vqaComparison = compareVirtualQA(preVQA.virtual, postVQA.virtual);
+        }
+
+        audit.apiCalls += 2;
+
+        // Emit results to state
+        emit.setQaVPreR(preVQA.ok ? preVQA.virtual : null);
+        emit.setQaVPostR(postVQA.ok ? postVQA.virtual : null);
+
+        var qaTestData = {
+          pre: preVQA,
+          post: postVQA,
+          comparison: vqaComparison,
+          timestamp: new Date().toISOString()
+        };
+        emit.setQaTests(qaTestData);
+
+        var totalTests = (preVQA.ok ? preVQA.virtual.summary.totalTests : 0) + (postVQA.ok ? postVQA.virtual.summary.totalTests : 0);
+        var bugsFound = (preVQA.ok ? preVQA.virtual.summary.bugsFound : 0) + (postVQA.ok ? postVQA.virtual.summary.bugsFound : 0);
+        var preservationRate = vqaComparison ? vqaComparison.preservationRate : null;
+
+        phaseEnd(phE, "done", { totalTests: totalTests, bugsFound: bugsFound, preservationRate: preservationRate });
+        emit.setLogs(function(p) { return p.map(function(l) { return l.phase === "qa-testing" && l.type === "phase" ? Object.assign({}, l, { st: "done", totalTests: totalTests, bugsFound: bugsFound, preservationRate: preservationRate, durationMs: Date.now() - l.ts }) : l; }); });
+      } catch (qaErr) {
+        phaseEnd(phE, "error", { error: qaErr.message });
+        emit.setLogs(function(p) { return p.map(function(l) { return l.phase === "qa-testing" && l.type === "phase" ? Object.assign({}, l, { st: "error", detail: qaErr.message, durationMs: Date.now() - l.ts }) : l; }); });
+      }
     }
 
     // ── Set initial finalScore before post-phases so they can read/blend it ──
