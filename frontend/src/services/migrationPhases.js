@@ -345,6 +345,7 @@ export async function doMigrate(code,fn,sl,sv,tl,tv,mid,pr,cbCtx,alreadyMigrated
   if (pr.mig.guide.length) sys+="\n\nGuidelines:\n"+pr.mig.guide.map(function(g){return "- "+g.replace(/\{TARGET\}/g,tn).replace(/\{TARGET_VER\}/g,tv).replace(/\{SOURCE\}/g,sn).replace(/\{SOURCE_VER\}/g,sv)}).join("\n");
   if (isCross) {
     sys+="\n\nCRITICAL CROSS-LANGUAGE RULES:\n- Output MUST be valid, runnable "+tn+" "+tv+" code\n- Translate EVERY construct \u2014 do not leave ANY "+sn+" syntax\n- Use "+tn+" standard library equivalents for ALL "+sn+" stdlib calls\n- Module system: use "+tn+" imports/exports (not "+sn+"'s)\n- Naming: follow "+tn+" conventions ("+((MODULE_CONVENTIONS[tl]||{}).naming||"target conventions")+")\n- Error handling: use "+tn+" try/catch patterns\n- The output must be a COMPLETE, self-contained "+tn+" file that could run as-is";
+    sys+="\n\nMULTI-FILE OUTPUT: If the source file should be split into multiple target files (e.g., separate interfaces, implementations, DTOs, config), return a JSON object:\n```json\n{\"files\": [{\"name\": \"FileName.ext\", \"content\": \"...full code...\"}, {\"name\": \"FileNameInterface.ext\", \"content\": \"...\"}]}\n```\nIf the migration is a single file, return ONLY the code (no JSON wrapper). Use multi-file output when:\n- A class with interface should be split (interface + implementation)\n- DTOs/models should be in separate files (per target language conventions)\n- Configuration should be separated from business logic\n- The target language convention requires one class per file (Java, Kotlin, C#)";
   }
   var usr="Migrate "+sn+" "+sv+" to "+tn+" "+tv+".\nSource file: "+fn+(targetFileName&&targetFileName!==fn?" Target file: "+targetFileName:"")+ctxBlock+planBlock+crossBlock+siblingBlock+"\n\nSOURCE:\n"+code;
   try {
@@ -355,6 +356,36 @@ export async function doMigrate(code,fn,sl,sv,tl,tv,mid,pr,cbCtx,alreadyMigrated
     var migTimeout=cap?cap.migTimeout:60000;
     var txt=await callAgent('migrate',sys,usr,mid,maxMigTokens,{timeout:migTimeout});
     var m=txt.replace(/^```[\w]*\n?/gm,"").replace(/\n?```$/gm,"").trim();
+
+    // Check for multi-file JSON response
+    var multiFile = null;
+    try {
+      var parsed = JSON.parse(m);
+      if (parsed && parsed.files && Array.isArray(parsed.files) && parsed.files.length > 0) {
+        multiFile = parsed.files;
+      }
+    } catch(jsonErr) {
+      // Also try extracting JSON from mixed text
+      var jsonMatch = m.match(/\{[\s\S]*"files"\s*:\s*\[[\s\S]*\]\s*\}/);
+      if (jsonMatch) {
+        try {
+          var p2 = JSON.parse(jsonMatch[0]);
+          if (p2 && p2.files && Array.isArray(p2.files) && p2.files.length > 0) multiFile = p2.files;
+        } catch(e2) {}
+      }
+    }
+
+    if (multiFile) {
+      // Multi-file output: primary file + additional files
+      var primaryContent = multiFile[0].content || "";
+      var additionalFiles = multiFile.slice(1).map(function(f) {
+        return { name: f.name, content: f.content || "" };
+      });
+      var ch = multiFile.map(function(f) { return "Generated: " + f.name; });
+      ch.unshift(sn+" "+sv+" \u2192 "+tn+" "+tv+" ("+multiFile.length+" files)");
+      return { migrated: primaryContent, changes: ch, engine: "claude-ai", additionalFiles: additionalFiles, multiFile: multiFile };
+    }
+
     var ch=(m.match(/(?:\/\/|#)\s*MIGRATED:.*/g)||[]).map(function(c){return c.replace(/(?:\/\/|#)\s*MIGRATED:\s*/,"").trim()});
     if (!ch.length) ch.push(sn+" "+sv+" \u2192 "+tn+" "+tv);
     return {migrated:m,changes:ch,engine:"claude-ai"};

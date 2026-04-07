@@ -616,6 +616,7 @@ function ResultsView(props) {
                     <span style={{width:6,height:6,borderRadius:"50%",background:dotColor,flexShrink:0}}/>
                     <span style={{fontFamily:T.f,fontSize:9,fontWeight:600,flex:1}}>{displayName}</span>
                     {x.isCross&&<span style={{padding:"0 4px",borderRadius:3,fontSize:6,fontWeight:700,background:T.blP,color:T.bl}}>{"→"}</span>}
+                    {x.isAdditionalFile&&<span style={{padding:"0 4px",borderRadius:4,fontSize:7,fontWeight:700,background:"#ede9fe",color:"#7c3aed"}}>{"generated"}</span>}
                     {x.intFixed&&<span style={{padding:"0 4px",borderRadius:4,fontSize:7,fontWeight:700,background:T.okBg,color:T.g}}>{"fixed"}</span>}
                   </div>
                   {x.isCross&&<div style={{fontSize:7,color:T.txD,marginLeft:10,fontFamily:T.f}}>{x.name+" → "+displayName}</div>}

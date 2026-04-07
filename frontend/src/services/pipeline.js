@@ -255,6 +255,27 @@ export async function runMigration(config, emit) {
       var r = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null, filePlan, cap);
       var d = mkDiff(f.content, r.migrated);
       rs.push(Object.assign({}, f, r, { diff: d, targetName: targetFN, targetPath: targetPath, isCross: isCross }));
+
+      // Handle multi-file output: add additional files to results
+      if (r.additionalFiles && r.additionalFiles.length > 0) {
+        r.additionalFiles.forEach(function(af) {
+          rs.push({
+            name: f.name,
+            content: "",
+            path: f.path || f.name,
+            migrated: af.content,
+            diff: mkDiff("", af.content),
+            targetName: af.name,
+            targetPath: af.name,
+            isCross: isCross,
+            changes: ["Generated from " + f.name],
+            engine: "claude-ai",
+            isAdditionalFile: true
+          });
+        });
+        emit.setRes(rs.slice());
+      }
+
       var thisChanges = r.changes.length;
       fileEntry.completedAt = new Date().toISOString();
       fileEntry.durationMs = Date.now() - fileEntry.startMs;
