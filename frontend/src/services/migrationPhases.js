@@ -5,7 +5,7 @@
 
 import { LANGS, TARGET_EXT, MODULE_CONVENTIONS } from "../config/languages.js";
 import { getParadigmMap } from "../config/paradigmMaps.js";
-import { callAgent } from "./agentClient.js";
+import { callAgent, callAgentChain } from "./agentClient.js";
 import { safeParseJSON } from "./utils.js";
 
 // ═══ Unified scoring rubric (shared across all evaluators) ═══
@@ -189,7 +189,7 @@ export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid,opts) {
     var cl=safeParseJSON(txt);
     if(!cl)throw new Error("Invalid JSON response");
     return {ok:true,analysis:cl,isCross:isCross};
-  } catch(e) { return {ok:false,error:e.message,isCross:isCross}; }
+  } catch(e) { console.error("[Analysis Error]",e.message); return {ok:false,error:e.message,isCross:isCross}; }
 }
 
 // ═══ PHASE B: Per-file Migration with codebase + already-migrated context ═══
