@@ -7,6 +7,7 @@ import { Router } from 'express';
 import fetch from 'node-fetch';
 import { z } from 'zod';
 import { validateBody } from '../middleware/validate.js';
+import { providerRateLimit } from '../middleware/providerRateLimit.js';
 import logger from '../services/logger.js';
 
 const router = Router();
@@ -142,7 +143,7 @@ const migrateSchema = z.object({
   provider: z.enum(['anthropic', 'deepseek', 'gemini', 'groq']).optional(),
 });
 
-router.post('/', validateBody(migrateSchema), async (req, res) => {
+router.post('/', validateBody(migrateSchema), providerRateLimit, async (req, res) => {
   const { model, max_tokens, system, messages, provider: reqProvider } = req.body;
 
   const provider = reqProvider || getProviderFromModel(model);

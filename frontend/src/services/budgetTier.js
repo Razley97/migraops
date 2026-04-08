@@ -34,6 +34,14 @@ export function shouldRunSecurityAudit(mid) {
 }
 
 /**
+ * Whether to run Lite QA validation (heuristic, no API call).
+ * Enabled for ALL tiers as a first-pass quality filter.
+ */
+export function shouldRunLiteQA(mid) {
+  return true;
+}
+
+/**
  * Check if a model is a free-tier provider (mirrors isFreeProvider from pipeline.js).
  */
 export function isFreeProvider(mid) {

@@ -4,9 +4,10 @@ import { mkDiff, mkRisks } from "./utils.js";
 import { runVirtualQA, compareVirtualQA } from "./qaHelpers.js";
 import { calcCapacity, resetTks, _tks, _activeController, setCancelled as setClaudeCancelled, setActiveController as setClaudeController } from "./claudeClient.js";
 import { doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation, doIntegrationCheck, doIntegrationFix, mapTargetFile } from "./migrationPhases.js";
-import { shouldRunInlineQA, shouldRunSecurityAudit, isFreeProvider } from "./budgetTier.js";
+import { shouldRunInlineQA, shouldRunSecurityAudit, shouldRunLiteQA, isFreeProvider } from "./budgetTier.js";
 import { doInlineQA, formatQAFeedback } from "./inlineQA.js";
 import { doSecurityAudit } from "./securityAuditPhase.js";
+import { validateLite } from "./liteValidator.js";
 
 // ══════════════════════════════════════════════════════════════
 // MigraOps Pipeline — Extensible migration engine
@@ -33,20 +34,34 @@ export function getRegisteredPhases() {
 // isFreeProvider imported from budgetTier.js (single source of truth)
 
 async function wrapPhase(fn, phaseName, emit, isFree) {
-  try { return await fn(); }
-  catch(e) {
-    if (!isFree || !(e.message && (e.message.includes("429") || e.message.includes("overloaded")))) throw e;
-    // Free-tier rate limit — cooldown and retry once
-    var cooldown = 60000;
-    if (emit && emit.setLogs) emit.setLogs(function(p) { return p.concat([{ type: "rate_limit", phase: phaseName, waitMs: cooldown, ts: Date.now(), msg: "Rate limit en " + phaseName + " — esperando " + Math.round(cooldown / 1000) + "s para reintentar" }]); });
-    await new Promise(function(ok) { setTimeout(ok, cooldown); });
+  var maxAttempts = 5;
+  var attempt = 0;
+  while (attempt <= maxAttempts) {
     try { return await fn(); }
-    catch(e2) {
-      // Phase truly failed — skip gracefully
-      if (emit && emit.setLogs) emit.setLogs(function(p) { return p.concat([{ type: "phase_skipped", phase: phaseName, ts: Date.now(), msg: phaseName + " omitida por límites de API gratuita" }]); });
-      return { ok: false, skipped: true, error: e2.message };
+    catch(e) {
+      var isRateLimit = e.message && (e.message.includes("429") || e.message.includes("overloaded"));
+      var isCircuitOpen = e.message && e.message.includes("circuit open");
+      // Only retry rate-limit errors for free-tier; propagate everything else
+      if (!isFree || !isRateLimit || isCircuitOpen) throw e;
+      attempt++;
+      if (attempt > maxAttempts) throw e;
+      // Backoff progresivo: 30s, 45s, 60s, 60s, 60s, ...
+      var cooldown = Math.min(60000, 30000 + (attempt - 1) * 15000);
+      if (emit && emit.setLogs) emit.setLogs(function(p) {
+        return p.concat([{
+          type: "rate_limit", phase: phaseName, waitMs: cooldown, ts: Date.now(),
+          attempt: attempt, maxAttempts: maxAttempts,
+          msg: "Rate limit en " + phaseName + " — reintento #" + attempt + "/" + maxAttempts + " en " + Math.round(cooldown / 1000) + "s"
+        }]);
+      });
+      await new Promise(function(ok) { setTimeout(ok, cooldown); });
+      // Verificar cancelación después del cooldown
+      if (emit && emit.cancelRef && emit.cancelRef.current) {
+        throw new Error("Migration cancelled during rate-limit wait");
+      }
     }
   }
+  throw new Error("Phase " + phaseName + " failed after " + maxAttempts + " retries");
 }
 
 async function freeTierCooldown(mid, emit, phase) {
@@ -288,6 +303,37 @@ export async function runMigration(config, emit) {
       var r = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null, filePlan, cap);
       var d = mkDiff(f.content, r.migrated);
       rs.push(Object.assign({}, f, r, { diff: d, targetName: targetFN, targetPath: targetPath, isCross: isCross }));
+
+      // ── Lite QA validation (all tiers, no API call) ──
+      if (shouldRunLiteQA(mod) && r.engine !== "fallback" && !emit.cancelRef.current) {
+        var liteResult = validateLite(f.content, r.migrated, sL, tL);
+        rs[rs.length - 1].liteQA = liteResult;
+        if (!liteResult.pass) {
+          emit.setLogs(function(p) { return p.map(function(l) {
+            if (l.file !== thisName || l.type !== "file") return l;
+            return Object.assign({}, l, { st: "lite-qa-failed", liteScore: liteResult.score, liteIssues: liteResult.issues.length });
+          }); });
+          // Re-migrate with lite feedback if critical issues and no LLM QA available
+          var hasCritical = liteResult.issues.some(function(i) { return i.severity === "critical"; });
+          if (hasCritical && !shouldRunInlineQA(mod) && !emit.cancelRef.current) {
+            emit.setLogs(function(p) { return p.map(function(l) {
+              if (l.file !== thisName || l.type !== "file") return l;
+              return Object.assign({}, l, { st: "re-migrating" });
+            }); });
+            audit.apiCalls++;
+            var liteFeedback = formatQAFeedback(liteResult);
+            var rLite = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null, Object.assign({}, filePlan, { qaFeedback: liteFeedback }), cap);
+            var dLite = mkDiff(f.content, rLite.migrated);
+            rs[rs.length - 1] = Object.assign({}, f, rLite, { diff: dLite, targetName: targetFN, targetPath: targetPath, isCross: isCross, liteQARetried: true, liteQA: liteResult });
+            r = rLite;
+          }
+        } else {
+          emit.setLogs(function(p) { return p.map(function(l) {
+            if (l.file !== thisName || l.type !== "file") return l;
+            return Object.assign({}, l, { liteScore: liteResult.score });
+          }); });
+        }
+      }
 
       // ── Inline QA validation (full tier only) ──
       if (shouldRunInlineQA(mod) && r.engine !== "fallback" && !emit.cancelRef.current) {
@@ -819,3 +865,6 @@ export function generatePDF(config, setPdfLd) {
   } catch(e) { console.error("PDF error:", e); }
   setPdfLd(false);
 }
+
+// ── Test-only exports ──
+export { wrapPhase as _wrapPhase };

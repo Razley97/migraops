@@ -7,6 +7,72 @@ import { LANGS, TARGET_EXT, MODULE_CONVENTIONS } from "../config/languages.js";
 import { getParadigmMap } from "../config/paradigmMaps.js";
 import { callAgent, callAgentChain } from "./agentClient.js";
 import { safeParseJSON } from "./utils.js";
+import { isFreeProvider } from "./budgetTier.js";
+import { extractContracts, contractsToString } from "./contractExtractor.js";
+import { getProfileFromModel } from "../config/providerProfiles.js";
+
+// ═══ Free-tier chunking helpers ═══
+// Estimate tokens: ~4 chars per token (rough heuristic)
+function estimateTokens(text, factor) {
+  factor = factor || 4.0;
+  return Math.ceil((text || "").length / factor * 1.15);
+}
+
+// Split files into chunks that fit under a token budget
+function chunkFilesByTokens(files, maxTokensPerChunk, factor) {
+  var chunks = [];
+  var current = [];
+  var currentTokens = 0;
+  for (var i = 0; i < files.length; i++) {
+    var fileTokens = estimateTokens(files[i].content || files[i].migrated || "", factor);
+    // If single file exceeds budget, it goes alone
+    if (current.length > 0 && currentTokens + fileTokens > maxTokensPerChunk) {
+      chunks.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+    current.push(files[i]);
+    currentTokens += fileTokens;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks.length > 0 ? chunks : [files];
+}
+
+// Compress file content: keep first N lines + signatures for context
+function compressContent(content, maxLines) {
+  if (!content) return "";
+  var lines = content.split("\n");
+  if (lines.length <= maxLines) return content;
+  return lines.slice(0, maxLines).join("\n") + "\n// ... (" + (lines.length - maxLines) + " more lines truncated)";
+}
+
+// Build manifest with optional compression for free-tier
+// opts.mode = "contracts" uses semantic extraction; opts.lang = target language
+// opts.maxLines = fallback line truncation (legacy)
+function buildManifest(files, opts) {
+  var mode = (opts && opts.mode) || "";
+  var lang = (opts && opts.lang) || "js";
+  var maxLines = (opts && opts.maxLines) || 0;
+  return files.map(function(f) {
+    var name = f.targetName || f.name;
+    var path = f.targetPath || f.path || "";
+    var code = f.migrated || f.content || "";
+    if (mode === "contracts") {
+      var fileLang = lang;
+      // Detect lang from extension if available
+      var ext = (name.match(/\.([^.]+)$/) || [])[1];
+      if (ext) {
+        var extMap = { js:"js", jsx:"jsx", ts:"ts", tsx:"tsx", py:"py", java:"java", kt:"kotlin", cs:"csharp", go:"go" };
+        if (extMap[ext]) fileLang = extMap[ext];
+      }
+      var contracts = extractContracts(code, fileLang);
+      code = contractsToString(contracts);
+    } else if (maxLines > 0) {
+      code = compressContent(code, maxLines);
+    }
+    return "### " + name + (path ? " (" + path + ")" : "") + "\n```\n" + code + "\n```";
+  }).join("\n\n");
+}
 
 // ═══ Unified scoring rubric (shared across all evaluators) ═══
 export var SCORING_RUBRIC="MANDATORY SCORING PROTOCOL:\n1) Score EACH of the 8 layers independently 0-100\n2) Final score = WEIGHTED AVERAGE: imports\u00d710 + architecture\u00d715 + async\u00d715 + security\u00d720 + errors\u00d710 + types\u00d710 + dataflow\u00d710 + idiomatic\u00d710, divided by 100\n3) Show math: (layer1\u00d7weight + layer2\u00d7weight + ...) / 100 = final\n\nLAYER SCORING GUIDE \u2014 be honest, not generous OR harsh:\n- 90-100: Excellent. Production-ready. Zero critical issues, minor style issues at most.\n- 75-89: Good. Functional with some quality gaps (incomplete validation, some legacy patterns).\n- 55-74: Acceptable. Works but real problems exist (security gaps, mixed paradigms, weak error handling).\n- 30-54: Poor. Significant issues but code structure is recognizable and partially functional.\n- 10-29: Broken. Syntax errors, unresolved imports, fundamentally non-functional.\n- 0-9: Empty or completely unrelated code.\n\nCALIBRATION: Even a naive literal translation that compiles should score 30-50. A decent automated migration typically scores 60-80. 90+ requires genuinely excellent, production-quality code.";
@@ -110,8 +176,10 @@ export async function doDeepAnalysis(origFiles,migratedResults,sl,sv,tl,tv,mid,l
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"};
   var ln=lnames[lang]||"Espa\u00f1ol";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+(r.targetPath?" ("+r.targetPath+")":"")+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
+  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
   var sys="You are a STRICT senior architect reviewing a "+sn+" "+sv+"\u2192"+tn+" "+tv+" migration ("+migratedResults.length+" files). Respond in "+ln+".\n\nAnalyze 8 layers INDEPENDENTLY with concrete findings per file:\n1) Architecture (15%) 2) Cross-file deps (10%) 3) Async model (15%) 4) Security (20%) 5) Error handling (10%) 6) Types/contracts (10%) 7) Data flow (10%) 8) API preservation (10%)\n\n"+SCORING_RUBRIC+"\n\nScore each layer first. Final score = weighted average. Show math.\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"weighted math\",\"layers\":[{\"name\":\"...\",\"score\":0-100,\"status\":\"pass|warn|fail\",\"detail\":\"1-2 sentences\"}],\"critical\":[{\"files\":[\"file.ext\"],\"category\":\"security|architecture|async|types|dataflow\",\"msg\":\"...\",\"fix\":\"fix\"}],\"improvements\":[{\"files\":[\"file.ext\"],\"category\":\"...\",\"msg\":\"...\",\"suggestion\":\"...\"}],\"strengths\":[\"...\"],\"summary\":\"2-3 sentences\"}";
   var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nDeep SYSTEM-LEVEL analysis. Score each layer independently, compute weighted average. Be strict \u2014 typical migration scores 65-80. ALL text in "+ln+". Respond ONLY JSON.";
   try {
@@ -163,6 +231,39 @@ export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid,opts) {
   var chainOpts=opts||{};
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
+
+  // Free-tier chunking: if total tokens exceed budget, split into batches
+  if (isFree && files.length > 1) {
+    var totalTokens = files.reduce(function(s,f) { return s + estimateTokens(f.content, tokenFactor); }, 0);
+    if (totalTokens > 3000) {
+      var chunks = chunkFilesByTokens(files, 3000, tokenFactor);
+      if (chunks.length > 1) {
+        console.log("[Phase A] Free-tier chunking: " + files.length + " files → " + chunks.length + " batches (" + totalTokens + " est. tokens)");
+        var mergedAnalysis = { purpose: "", architecture: "", files: [], dependencies: [], criticalPaths: [], risks: [], migrationOrder: [], sharedContracts: [], fileMapping: [] };
+        for (var ci = 0; ci < chunks.length; ci++) {
+          var chunkResult = await doCodebaseAnalysis(chunks[ci], sl, sv, tl, tv, mid, Object.assign({}, chainOpts, { _noChunk: true }));
+          if (chunkResult.ok && chunkResult.analysis) {
+            var ca = chunkResult.analysis;
+            if (ca.purpose && !mergedAnalysis.purpose) mergedAnalysis.purpose = ca.purpose;
+            if (ca.architecture && !mergedAnalysis.architecture) mergedAnalysis.architecture = ca.architecture;
+            mergedAnalysis.files = mergedAnalysis.files.concat(ca.files || []);
+            mergedAnalysis.dependencies = mergedAnalysis.dependencies.concat(ca.dependencies || []);
+            mergedAnalysis.criticalPaths = mergedAnalysis.criticalPaths.concat(ca.criticalPaths || []);
+            mergedAnalysis.risks = mergedAnalysis.risks.concat(ca.risks || []);
+            mergedAnalysis.migrationOrder = mergedAnalysis.migrationOrder.concat(ca.migrationOrder || []);
+            mergedAnalysis.sharedContracts = mergedAnalysis.sharedContracts.concat(ca.sharedContracts || []);
+            if (ca.fileMapping) mergedAnalysis.fileMapping = mergedAnalysis.fileMapping.concat(ca.fileMapping);
+          } else {
+            return chunkResult; // propagate error
+          }
+        }
+        return { ok: true, analysis: mergedAnalysis, isCross: isCross };
+      }
+    }
+  }
+
   var manifest=files.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
 
   var crossBlock="";
@@ -403,7 +504,9 @@ export async function doMigrate(code,fn,sl,sv,tl,tv,mid,pr,cbCtx,alreadyMigrated
 export async function doDependencyAudit(origFiles,migratedResults,sl,sv,tl,tv,mid) {
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
 
   var crossCtx="";
   if (isCross) {
@@ -430,8 +533,10 @@ export async function doDependencyAudit(origFiles,migratedResults,sl,sv,tl,tv,mi
 export async function doConsolidation(origFiles,migratedResults,sl,sv,tl,tv,mid,depAudit) {
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
+  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
 
   var crossInstr="";
   if (isCross) {
@@ -480,9 +585,11 @@ export async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,m
   var chainOpts=opts||{};
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"}; var ln=lnames[lang]||"Espa\u00f1ol";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+(f.path?" ("+f.path+")":"")+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;var dp=r.targetPath||r.path||dn;return "### "+dn+(dp?" ("+dp+")":"")+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
 
   var crossBlock="";
   if (isCross) {
@@ -549,8 +656,10 @@ export async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,m
 export async function doIntegrationFix(origFiles,migratedResults,issues,sl,sv,tl,tv,mid,iteration,prevIssues) {
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var isCross=sl!==tl;
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
+  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
   // Sort issues by severity for priority fixing
   var sevOrder={critical:0,major:1,moderate:2,minor:3};
   var sortedIssues=issues.slice().sort(function(a,b){return (sevOrder[a.severity]||3)-(sevOrder[b.severity]||3)});
@@ -589,10 +698,12 @@ export async function doIntegrationFix(origFiles,migratedResults,issues,sl,sv,tl
 
 export async function doReview(origFiles,migratedResults,sl,sv,tl,tv,mid,pr,lang) {
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"};
   var ln=lnames[lang]||"Espa\u00f1ol";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){var dn=r.targetName||r.name;return "### "+dn+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
   var sys="You are a STRICT QA reviewer: "+sn+" "+sv+"\u2192"+tn+" "+tv+" ("+migratedResults.length+" files). Respond in "+ln+".\n\nScore each dimension independently FIRST, then compute weighted average:\n- Functional(25%): Does migrated code produce same outputs for same inputs? Test with empty, null, error cases.\n- Syntax(15%): Valid compilable "+tv+"? All imports resolve? All types correct?\n- Idiomatic(15%): Genuine modern "+tv+" patterns? No legacy "+sv+" holdovers? Proper stdlib usage?\n- Async(10%): Async model fully migrated and consistent? No mixed paradigms?\n- Security(15%): SQL injection, XSS, resource leaks, input validation, hardcoded secrets?\n- Errors(8%): All error paths covered? No swallowed exceptions? Resource cleanup?\n- Contracts(7%): Public API surface preserved? Function signatures compatible for callers?\n- Docs(5%): MIGRATED comments present? Clear naming? Self-documenting code?\n\n"+SCORING_RUBRIC+"\n\nFinal score = weighted average of dimensions. Verdict: aprobado(90+), con_observaciones(70-89), rechazado(<70).\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"func:X\u00d725 + syn:X\u00d715 + idi:X\u00d715 + async:X\u00d710 + sec:X\u00d715 + err:X\u00d78 + con:X\u00d77 + doc:X\u00d75 = N/100\",\"verdict\":\"aprobado|con_observaciones|rechazado\",\"dimensions\":{\"functional\":0-100,\"syntax\":0-100,\"idiomatic\":0-100,\"async\":0-100,\"security\":0-100,\"errors\":0-100,\"contracts\":0-100,\"docs\":0-100},\"errors\":[{\"file\":\"...\",\"line\":0,\"severity\":\"critical|major|minor\",\"dimension\":\"functional|syntax|idiomatic|async|security|errors|contracts|docs\",\"msg\":\"in "+ln+"\"}],\"warnings\":[{\"file\":\"...\",\"line\":0,\"dimension\":\"...\",\"msg\":\"in "+ln+"\"}],\"good\":[\"in "+ln+"\"],\"summary\":\"2-3 sentences in "+ln+"\"}";
   var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nStrict review. Score each dimension independently. Compute weighted average. Typical migration: 65-80. ALL text in "+ln+". Respond ONLY JSON.";
   try {
@@ -624,8 +735,10 @@ export async function doFixPlan(origFiles,migratedResults,review,sl,sv,tl,tv,mid
   var sn=(LANGS[sl]||{}).n||sl, tn=(LANGS[tl]||{}).n||tl;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"};
   var ln=lnames[lang]||"Espa\u00f1ol";
-  var origManifest=origFiles.map(function(f){return "### "+f.name+"\n```\n"+f.content+"\n```"}).join("\n\n");
-  var migManifest=migratedResults.map(function(r){return "### "+r.name+"\n```\n"+r.migrated+"\n```"}).join("\n\n");
+  var isFree=isFreeProvider(mid);
+  var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
+  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
   var errList=(review.errors||[]).map(function(e){return "["+((e.file||"?"))+"] "+(e.line?"Ln "+e.line+": ":"")+e.msg}).join("\n");
   var warnList=(review.warnings||[]).map(function(w){return "["+((w.file||"?"))+"] "+w.msg}).join("\n");
   var sys="Fix "+migratedResults.length+" files: "+sn+" "+sv+"\u2192"+tn+" "+tv+" migration. Respond in "+ln+".\n\nFormat:\n---ACTION_PLAN---\n(numbered steps in "+ln+")\n---CORRECTED_FILES---\nJSON: {\"files\":{\"filename\":\"full source\",...}}\n---CHECKLIST---\n(verification items in "+ln+")";
@@ -646,3 +759,5 @@ export async function doFixPlan(origFiles,migratedResults,review,sl,sv,tl,tv,mid
     return {ok:true,plan:plan,files:filesJson,checklist:checklist};
   } catch(e) { return {ok:false,error:e.message}; }
 }
+
+export { estimateTokens as _estimateTokens, chunkFilesByTokens as _chunkFilesByTokens };

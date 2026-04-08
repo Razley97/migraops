@@ -11,26 +11,15 @@ export function setCancelled(v) { _cancelled = v; }
 export function setActiveController(v) { _activeController = v; }
 export function resetTks() { _tks = {i:0,o:0,calls:0,last:{i:0,o:0}}; }
 
-// ═══ Client-side rate limiter for free-tier providers ═══
-var _lastCallMs = 0;
-var PROVIDER_THROTTLE = {
-  gemini: 4500,   // 15 RPM = 1 call per 4s, with margin
-  groq: 2200,     // 30 RPM = 1 call per 2s, with margin
-  deepseek: 500,  // cheap, light throttle
-  anthropic: 0    // paid, no throttle
-};
+// ═══ Client-side rate limiter — uses Provider Profiles ═══
+import { getProfileFromModel, getProviderFromModel } from "../config/providerProfiles.js";
+import { canCall, recordSuccess, recordFailure, getState } from "./circuitBreaker.js";
 
-function getProviderFromModel(mid) {
-  if (!mid) return "anthropic";
-  if (mid.startsWith("deepseek")) return "deepseek";
-  if (mid.startsWith("gemini")) return "gemini";
-  if (mid.startsWith("llama") || mid.startsWith("gemma") || mid.startsWith("mixtral")) return "groq";
-  return "anthropic";
-}
+var _lastCallMs = 0;
 
 async function throttle(mid) {
-  var provider = getProviderFromModel(mid);
-  var minGap = PROVIDER_THROTTLE[provider] || 0;
+  var profile = getProfileFromModel(mid);
+  var minGap = profile.throttleMs || 0;
   if (minGap <= 0) return;
   var now = Date.now();
   var elapsed = now - _lastCallMs;
@@ -43,12 +32,13 @@ async function throttle(mid) {
 export async function callClaude(sys,usr,mid,mt,opts) {
   var o=opts||{};
   if (_cancelled) throw new Error("Migration cancelled");
-  var isFreeProvider=mid&&(mid.startsWith("gemini")||mid.startsWith("llama")||mid.startsWith("gemma")||mid.startsWith("mixtral"));
-  var maxRetries=o.retries!==undefined?o.retries:(isFreeProvider?5:1);
+  var profile=getProfileFromModel(mid);
+  var maxRetries=o.retries!==undefined?o.retries:profile.retryConfig.maxRetries;
   var isSlowProvider=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini-2.5"));
   var timeout=o.timeout||(isSlowProvider?120000:60000);
   for (var attempt=0;attempt<=maxRetries;attempt++) {
     if (_cancelled) throw new Error("Migration cancelled");
+    var provider=getProviderFromModel(mid);if(!canCall(provider)){var cbState=getState(provider);throw new Error("Provider "+provider+" circuit open — retry in "+Math.round((cbState.remainingMs||0)/1000)+"s");}
     var defaultMt=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini"))?8000:4000;
     var controller=new AbortController();
     _activeController=controller; // expose so cancel button can abort
@@ -63,17 +53,17 @@ export async function callClaude(sys,usr,mid,mt,opts) {
       clearTimeout(timer);
       _activeController=null;
       if (_cancelled) throw new Error("Migration cancelled");
-      if (r.status===429||r.status===529||r.status===503) { if(attempt<maxRetries){var baseBack=isFreeProvider?8000:3000;var maxBack=isFreeProvider?120000:15000;var backoff=r.status===429?Math.min(maxBack,baseBack*Math.pow(2,attempt)):2000;var retryAfter=r.headers&&r.headers.get?r.headers.get("retry-after"):null;if(retryAfter){var ra=parseInt(retryAfter,10);if(!isNaN(ra)&&ra>0&&ra<300)backoff=ra*1000;}console.log("[Rate Limit] "+getProviderFromModel(mid)+" "+r.status+" — waiting "+Math.round(backoff/1000)+"s (attempt "+(attempt+1)+"/"+maxRetries+")");if(o.onRetry){o.onRetry({attempt:attempt+1,maxAttempts:maxRetries,waitMs:backoff,provider:getProviderFromModel(mid),status:r.status});}await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
-      if (!r.ok) throw new Error("API "+r.status);
+      if (r.status===429||r.status===529||r.status===503) { recordFailure(provider,r.status);if(attempt<maxRetries){var baseBack=profile.retryConfig.baseBackoff;var maxBack=profile.retryConfig.maxBackoff;var backoff=r.status===429?Math.min(maxBack,baseBack*Math.pow(2,attempt)):2000;var retryAfter=r.headers&&r.headers.get?r.headers.get("retry-after"):null;if(retryAfter){var ra=parseInt(retryAfter,10);if(!isNaN(ra)&&ra>0&&ra<300)backoff=ra*1000;}console.log("[Rate Limit] "+getProviderFromModel(mid)+" "+r.status+" — waiting "+Math.round(backoff/1000)+"s (attempt "+(attempt+1)+"/"+maxRetries+")");if(o.onRetry){o.onRetry({attempt:attempt+1,maxAttempts:maxRetries,waitMs:backoff,provider:getProviderFromModel(mid),status:r.status});}await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
+      if (!r.ok) { recordFailure(provider,r.status); throw new Error("API "+r.status); }
       var d = await r.json();
       if (d.usage) { _tks.i+=(d.usage.input_tokens||0); _tks.o+=(d.usage.output_tokens||0); _tks.calls++; _tks.last={i:d.usage.input_tokens||0,o:d.usage.output_tokens||0}; }
       if (d.stop_reason==="max_tokens"&&attempt<maxRetries) { mt=Math.min(16000,Math.round((mt||4000)*1.5)); continue; }
-      return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");
+      recordSuccess(provider);return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");
     } catch(e) {
       clearTimeout(timer);
       _activeController=null;
       if (_cancelled) throw new Error("Migration cancelled");
-      if (e.name==="AbortError") {
+      if (e.name==="AbortError") { recordFailure(provider,0);
         if (attempt<maxRetries) continue;
         throw new Error("Timeout after "+Math.round(timeout/1000)+"s");
       }

@@ -329,6 +329,7 @@ export default function MigratingView(props) {
                         <div style={{fontSize:11,fontWeight:700,color:"#fbbf24"}}>{l.msg}</div>
                         <div style={{fontSize:10,color:"#f59e0b",fontFamily:T.f,fontWeight:600,marginTop:2}}>
                           {remaining>0?(t.rateLimitWait+" "+remaining+"s..."):t.rateLimitWait}
+                          {l.attempt&&<span style={{marginLeft:6,opacity:0.8}}>{"(intento #"+l.attempt+(l.maxAttempts?"/"+l.maxAttempts:"")+")"}</span>}
                         </div>
                       </div>
                       {remaining>0&&<div style={{fontFamily:T.f,fontSize:18,fontWeight:900,color:"#f59e0b"}}>{remaining+"s"}</div>}
