@@ -39,7 +39,8 @@ export async function callClaude(sys,usr,mid,mt,opts) {
   for (var attempt=0;attempt<=maxRetries;attempt++) {
     if (_cancelled) throw new Error("Migration cancelled");
     var provider=getProviderFromModel(mid);if(!canCall(provider)){var cbState=getState(provider);throw new Error("Provider "+provider+" circuit open — retry in "+Math.round((cbState.remainingMs||0)/1000)+"s");}
-    var defaultMt=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini"))?8000:4000;
+    var maxOut=profile.maxOutputTokens||8192;
+    var defaultMt=Math.min(maxOut,mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini"))?8000:4000);
     var controller=new AbortController();
     _activeController=controller; // expose so cancel button can abort
     var timer=setTimeout(function(){controller.abort()},timeout);
@@ -57,7 +58,7 @@ export async function callClaude(sys,usr,mid,mt,opts) {
       if (!r.ok) { recordFailure(provider,r.status); throw new Error("API "+r.status); }
       var d = await r.json();
       if (d.usage) { _tks.i+=(d.usage.input_tokens||0); _tks.o+=(d.usage.output_tokens||0); _tks.calls++; _tks.last={i:d.usage.input_tokens||0,o:d.usage.output_tokens||0}; }
-      if (d.stop_reason==="max_tokens"&&attempt<maxRetries) { mt=Math.min(16000,Math.round((mt||4000)*1.5)); continue; }
+      if (d.stop_reason==="max_tokens"&&attempt<maxRetries) { var newMt=Math.min(maxOut,Math.round((mt||defaultMt)*1.5)); if(newMt<=(mt||defaultMt)){recordSuccess(provider);return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");} mt=newMt; continue; }
       recordSuccess(provider);return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");
     } catch(e) {
       clearTimeout(timer);

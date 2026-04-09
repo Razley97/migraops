@@ -4,7 +4,7 @@ import { mkDiff, mkRisks } from "./utils.js";
 import { runVirtualQA, compareVirtualQA } from "./qaHelpers.js";
 import { calcCapacity, resetTks, _tks, _activeController, setCancelled as setClaudeCancelled, setActiveController as setClaudeController } from "./claudeClient.js";
 import { doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation, doIntegrationCheck, doIntegrationFix, mapTargetFile } from "./migrationPhases.js";
-import { shouldRunInlineQA, shouldRunSecurityAudit, shouldRunLiteQA, isFreeProvider } from "./budgetTier.js";
+import { shouldRunInlineQA, shouldRunSecurityAudit, shouldRunLiteQA, isFreeProvider, getBudgetTier } from "./budgetTier.js";
 import { doInlineQA, formatQAFeedback } from "./inlineQA.js";
 import { doSecurityAudit } from "./securityAuditPhase.js";
 import { validateLite } from "./liteValidator.js";
@@ -201,7 +201,7 @@ export async function runMigration(config, emit) {
     emit.setProg(2);
     var phA = phaseStart(audit, "A", "Codebase Analysis");
     audit.apiCalls++;
-    var cbCtx = await wrapPhase(function() { return doCodebaseAnalysis(files, sL, sV, tL, tV, mod, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "A-analysis", emit, isFreeProvider(mod));
+    var cbCtx = await wrapPhase(function() { return doCodebaseAnalysis(files, sL, sV, tL, tV, mod, { useChain: getBudgetTier(mod)==="full", onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "A-analysis", emit, isFreeProvider(mod));
     if (cbCtx.skipped) cbCtx = { ok: false, error: "Analysis skipped (rate limit)", analysis: {}, isCross: sL !== tL };
     phaseEnd(phA, cbCtx.ok ? "done" : "error", { detail: cbCtx.ok ? (cbCtx.analysis.purpose || "OK") : "Error", ok: cbCtx.ok });
     emit.setCbA(cbCtx);
@@ -525,7 +525,7 @@ export async function runMigration(config, emit) {
     }
 
     // ═══ PHASE C+D LOOP: Integration Check → Fix → Re-check ═══
-    var INT_PASS = 90, INT_MAX = 2;
+    var INT_PASS = 90, INT_MAX = getBudgetTier(mod) === "full" ? 2 : 1;
     emit.setActiveAgent("qa");
     emit.setMigPhase("integration");
     var intCheck = null, intIter = 0, prevCtx = null, prevIssues = null, lastScore = -1;
@@ -545,7 +545,7 @@ export async function runMigration(config, emit) {
       emit.setProg(progC);
       audit.apiCalls++;
       await freeTierCooldown(mod, emit, "B2-to-C");
-      intCheck = await wrapPhase(function() { return doIntegrationCheck(files, rs, sL, sV, tL, tV, mod, uiL, prevCtx, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "C-integration", emit, isFreeProvider(mod));
+      intCheck = await wrapPhase(function() { return doIntegrationCheck(files, rs, sL, sV, tL, tV, mod, uiL, prevCtx, { useChain: getBudgetTier(mod)==="full", onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "C-integration", emit, isFreeProvider(mod));
       if (intCheck.skipped) { intCheck = { ok: false, result: { score: 0, issues: [], pass: false } }; break; }
       var intScore = intCheck.ok ? (intCheck.result.score || 0) : 0;
       var intIssues = intCheck.ok ? (intCheck.result.issues || []) : [];
@@ -645,7 +645,7 @@ export async function runMigration(config, emit) {
     }
 
     // ═══ PHASE E: QA Testing — Virtual execution & comparison ═══
-    if (!emit.cancelRef.current) {
+    if (!emit.cancelRef.current && getBudgetTier(mod) === "full") {
       emit.setActiveAgent("qa");
       emit.setMigPhase("qa-testing");
       var phE = phaseStart(audit, "E", "QA Testing");

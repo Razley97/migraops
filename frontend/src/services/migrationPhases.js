@@ -17,6 +17,17 @@ function estimateTokens(text, factor) {
   factor = factor || 4.0;
   return Math.ceil((text || "").length / factor * 1.15);
 }
+// Adaptive compression: compress when estimated tokens exceed 70% of provider's maxInputTokens
+function shouldCompress(origFiles, migFiles, profile) {
+  var factor = profile.tokenEstimatorFactor || 4.0;
+  var totalTokens = (origFiles || []).reduce(function(s, f) {
+    return s + estimateTokens(f.content || f.migrated || "", factor);
+  }, 0) + (migFiles || []).reduce(function(s, f) {
+    return s + estimateTokens(f.migrated || f.content || "", factor);
+  }, 0);
+  return totalTokens > (profile.maxInputTokens || 65536) * 0.7;
+}
+
 
 // Split files into chunks that fit under a token budget
 function chunkFilesByTokens(files, maxTokensPerChunk, factor) {
@@ -178,8 +189,8 @@ export async function doDeepAnalysis(origFiles,migratedResults,sl,sv,tl,tv,mid,l
   var ln=lnames[lang]||"Espa\u00f1ol";
   var isFree=isFreeProvider(mid);
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
-  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var origManifest=buildManifest(origFiles, (isFree || shouldCompress(origFiles, migratedResults || [], getProfileFromModel(mid))) ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
   var sys="You are a STRICT senior architect reviewing a "+sn+" "+sv+"\u2192"+tn+" "+tv+" migration ("+migratedResults.length+" files). Respond in "+ln+".\n\nAnalyze 8 layers INDEPENDENTLY with concrete findings per file:\n1) Architecture (15%) 2) Cross-file deps (10%) 3) Async model (15%) 4) Security (20%) 5) Error handling (10%) 6) Types/contracts (10%) 7) Data flow (10%) 8) API preservation (10%)\n\n"+SCORING_RUBRIC+"\n\nScore each layer first. Final score = weighted average. Show math.\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"weighted math\",\"layers\":[{\"name\":\"...\",\"score\":0-100,\"status\":\"pass|warn|fail\",\"detail\":\"1-2 sentences\"}],\"critical\":[{\"files\":[\"file.ext\"],\"category\":\"security|architecture|async|types|dataflow\",\"msg\":\"...\",\"fix\":\"fix\"}],\"improvements\":[{\"files\":[\"file.ext\"],\"category\":\"...\",\"msg\":\"...\",\"suggestion\":\"...\"}],\"strengths\":[\"...\"],\"summary\":\"2-3 sentences\"}";
   var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nDeep SYSTEM-LEVEL analysis. Score each layer independently, compute weighted average. Be strict \u2014 typical migration scores 65-80. ALL text in "+ln+". Respond ONLY JSON.";
   try {
@@ -235,10 +246,10 @@ export async function doCodebaseAnalysis(files,sl,sv,tl,tv,mid,opts) {
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
 
   // Free-tier chunking: if total tokens exceed budget, split into batches
-  if (isFree && files.length > 1) {
+  if ((isFree || shouldCompress(files, [], getProfileFromModel(mid))) && files.length > 1) {
     var totalTokens = files.reduce(function(s,f) { return s + estimateTokens(f.content, tokenFactor); }, 0);
     if (totalTokens > 3000) {
-      var chunks = chunkFilesByTokens(files, 3000, tokenFactor);
+      var chunks = chunkFilesByTokens(files, Math.min(Math.floor((getProfileFromModel(mid).maxInputTokens || 65536) * 0.5), 30000), tokenFactor);
       if (chunks.length > 1) {
         console.log("[Phase A] Free-tier chunking: " + files.length + " files → " + chunks.length + " batches (" + totalTokens + " est. tokens)");
         var mergedAnalysis = { purpose: "", architecture: "", files: [], dependencies: [], criticalPaths: [], risks: [], migrationOrder: [], sharedContracts: [], fileMapping: [] };
@@ -506,7 +517,7 @@ export async function doDependencyAudit(origFiles,migratedResults,sl,sv,tl,tv,mi
   var isCross=sl!==tl;
   var isFree=isFreeProvider(mid);
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
 
   var crossCtx="";
   if (isCross) {
@@ -535,8 +546,8 @@ export async function doConsolidation(origFiles,migratedResults,sl,sv,tl,tv,mid,
   var isCross=sl!==tl;
   var isFree=isFreeProvider(mid);
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
-  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var origManifest=buildManifest(origFiles, (isFree || shouldCompress(origFiles, migratedResults || [], getProfileFromModel(mid))) ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
 
   var crossInstr="";
   if (isCross) {
@@ -588,8 +599,8 @@ export async function doIntegrationCheck(origFiles,migratedResults,sl,sv,tl,tv,m
   var isFree=isFreeProvider(mid);
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"}; var ln=lnames[lang]||"Espa\u00f1ol";
-  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var origManifest=buildManifest(origFiles, (isFree || shouldCompress(origFiles, migratedResults || [], getProfileFromModel(mid))) ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
 
   var crossBlock="";
   if (isCross) {
@@ -658,8 +669,8 @@ export async function doIntegrationFix(origFiles,migratedResults,issues,sl,sv,tl
   var isCross=sl!==tl;
   var isFree=isFreeProvider(mid);
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
-  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var origManifest=buildManifest(origFiles, (isFree || shouldCompress(origFiles, migratedResults || [], getProfileFromModel(mid))) ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
   // Sort issues by severity for priority fixing
   var sevOrder={critical:0,major:1,moderate:2,minor:3};
   var sortedIssues=issues.slice().sort(function(a,b){return (sevOrder[a.severity]||3)-(sevOrder[b.severity]||3)});
@@ -702,8 +713,8 @@ export async function doReview(origFiles,migratedResults,sl,sv,tl,tv,mid,pr,lang
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
   var lnames={es:"Espa\u00f1ol",en:"English",pt:"Portugu\u00eas"};
   var ln=lnames[lang]||"Espa\u00f1ol";
-  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var origManifest=buildManifest(origFiles, (isFree || shouldCompress(origFiles, migratedResults || [], getProfileFromModel(mid))) ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
   var sys="You are a STRICT QA reviewer: "+sn+" "+sv+"\u2192"+tn+" "+tv+" ("+migratedResults.length+" files). Respond in "+ln+".\n\nScore each dimension independently FIRST, then compute weighted average:\n- Functional(25%): Does migrated code produce same outputs for same inputs? Test with empty, null, error cases.\n- Syntax(15%): Valid compilable "+tv+"? All imports resolve? All types correct?\n- Idiomatic(15%): Genuine modern "+tv+" patterns? No legacy "+sv+" holdovers? Proper stdlib usage?\n- Async(10%): Async model fully migrated and consistent? No mixed paradigms?\n- Security(15%): SQL injection, XSS, resource leaks, input validation, hardcoded secrets?\n- Errors(8%): All error paths covered? No swallowed exceptions? Resource cleanup?\n- Contracts(7%): Public API surface preserved? Function signatures compatible for callers?\n- Docs(5%): MIGRATED comments present? Clear naming? Self-documenting code?\n\n"+SCORING_RUBRIC+"\n\nFinal score = weighted average of dimensions. Verdict: aprobado(90+), con_observaciones(70-89), rechazado(<70).\n\nRespond ONLY JSON:\n{\"score\":0-100,\"scoreBreakdown\":\"func:X\u00d725 + syn:X\u00d715 + idi:X\u00d715 + async:X\u00d710 + sec:X\u00d715 + err:X\u00d78 + con:X\u00d77 + doc:X\u00d75 = N/100\",\"verdict\":\"aprobado|con_observaciones|rechazado\",\"dimensions\":{\"functional\":0-100,\"syntax\":0-100,\"idiomatic\":0-100,\"async\":0-100,\"security\":0-100,\"errors\":0-100,\"contracts\":0-100,\"docs\":0-100},\"errors\":[{\"file\":\"...\",\"line\":0,\"severity\":\"critical|major|minor\",\"dimension\":\"functional|syntax|idiomatic|async|security|errors|contracts|docs\",\"msg\":\"in "+ln+"\"}],\"warnings\":[{\"file\":\"...\",\"line\":0,\"dimension\":\"...\",\"msg\":\"in "+ln+"\"}],\"good\":[\"in "+ln+"\"],\"summary\":\"2-3 sentences in "+ln+"\"}";
   var usr="ORIGINAL CODEBASE ("+sn+" "+sv+"):\n"+origManifest+"\n\n===\n\nMIGRATED CODEBASE ("+tn+" "+tv+"):\n"+migManifest+"\n\nStrict review. Score each dimension independently. Compute weighted average. Typical migration: 65-80. ALL text in "+ln+". Respond ONLY JSON.";
   try {
@@ -737,8 +748,8 @@ export async function doFixPlan(origFiles,migratedResults,review,sl,sv,tl,tv,mid
   var ln=lnames[lang]||"Espa\u00f1ol";
   var isFree=isFreeProvider(mid);
   var tokenFactor = getProfileFromModel(mid).tokenEstimatorFactor;
-  var origManifest=buildManifest(origFiles, isFree ? { mode: "contracts", lang: sl } : {});
-  var migManifest=buildManifest(migratedResults, isFree ? { mode: "contracts", lang: tl } : {});
+  var origManifest=buildManifest(origFiles, (isFree || shouldCompress(origFiles, migratedResults || [], getProfileFromModel(mid))) ? { mode: "contracts", lang: sl } : {});
+  var migManifest=buildManifest(migratedResults, (isFree || shouldCompress(origFiles || [], migratedResults, getProfileFromModel(mid))) ? { mode: "contracts", lang: tl } : {});
   var errList=(review.errors||[]).map(function(e){return "["+((e.file||"?"))+"] "+(e.line?"Ln "+e.line+": ":"")+e.msg}).join("\n");
   var warnList=(review.warnings||[]).map(function(w){return "["+((w.file||"?"))+"] "+w.msg}).join("\n");
   var sys="Fix "+migratedResults.length+" files: "+sn+" "+sv+"\u2192"+tn+" "+tv+" migration. Respond in "+ln+".\n\nFormat:\n---ACTION_PLAN---\n(numbered steps in "+ln+")\n---CORRECTED_FILES---\nJSON: {\"files\":{\"filename\":\"full source\",...}}\n---CHECKLIST---\n(verification items in "+ln+")";
