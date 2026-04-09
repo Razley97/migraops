@@ -18,6 +18,24 @@ export function safeParseJSON(str) {
     if(m){try{return JSON.parse(m[1])}catch(e2){}}
     var m2=s.match(/(\[[\s\S]*\])/);
     if(m2){try{return JSON.parse(m2[1])}catch(e3){}}
+    // Try to repair truncated JSON (max_tokens cut off mid-response)
+    var jsonStart=s.indexOf("{");
+    if(jsonStart>=0){
+      var truncated=s.slice(jsonStart);
+      // Remove trailing incomplete values (truncated strings, etc.)
+      truncated=truncated.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"{}[\]]*$/,"");
+      truncated=truncated.replace(/,\s*$/,"");
+      // Count and close unclosed braces/brackets
+      var opens=0,closesNeeded=[];
+      for(var i=0;i<truncated.length;i++){
+        var c=truncated[i];
+        if(c==="{"){ opens++; closesNeeded.push("}"); }
+        else if(c==="["){ closesNeeded.push("]"); }
+        else if(c==="}"||c==="]"){ closesNeeded.pop(); }
+      }
+      truncated+=closesNeeded.reverse().join("");
+      try{return JSON.parse(truncated)}catch(e4){}
+    }
     return null;
   }
 }

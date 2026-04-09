@@ -25,6 +25,7 @@ function ResultsView(props) {
   var CodeLine=props.CodeLine;
   var pwComparison=props.pwComparison;
   var visualQA=props.visualQA;
+  var qaTests=props.qaTests;
 
   // Resolve screenshots from IndexedDB when visualQA report is available
   var resolvedVQAState = useState(null);
@@ -615,6 +616,7 @@ function ResultsView(props) {
                     <span style={{width:6,height:6,borderRadius:"50%",background:dotColor,flexShrink:0}}/>
                     <span style={{fontFamily:T.f,fontSize:9,fontWeight:600,flex:1}}>{displayName}</span>
                     {x.isCross&&<span style={{padding:"0 4px",borderRadius:3,fontSize:6,fontWeight:700,background:T.blP,color:T.bl}}>{"→"}</span>}
+                    {x.isAdditionalFile&&<span style={{padding:"0 4px",borderRadius:4,fontSize:7,fontWeight:700,background:"#ede9fe",color:"#7c3aed"}}>{"generated"}</span>}
                     {x.intFixed&&<span style={{padding:"0 4px",borderRadius:4,fontSize:7,fontWeight:700,background:T.okBg,color:T.g}}>{"fixed"}</span>}
                   </div>
                   {x.isCross&&<div style={{fontSize:7,color:T.txD,marginLeft:10,fontFamily:T.f}}>{x.name+" → "+displayName}</div>}
@@ -651,7 +653,7 @@ function ResultsView(props) {
       {/* RESULT TABS */}
       {res.length>0&&<div style={{maxWidth:1200,margin:"0 auto",padding:"0 24px 16px"}}>
         <div style={{display:"flex",gap:2,background:T.cBg,borderRadius:10,padding:3,border:"1px solid "+T.bdL,marginBottom:10}}>
-          {[{k:"code",l:"Código"},{k:"audit",l:"Auditoría"},{k:"visual",l:"Visual"},{k:"risks",l:"Riesgos"}].map(function(tb){return <button key={tb.k} onClick={function(){setResTab(tb.k)}} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:resTab===tb.k?700:500,background:resTab===tb.k?T.w:"transparent",color:resTab===tb.k?T.nv:T.txM,boxShadow:resTab===tb.k?"0 1px 3px rgba(0,0,0,.08)":"none",fontFamily:T.ui,transition:"all .2s"}}>{tb.l}</button>})}
+          {[{k:"code",l:"Código"},{k:"audit",l:"Auditoría"},{k:"visual",l:"Visual"},{k:"testing",l:"QA Tests"},{k:"risks",l:"Riesgos"}].map(function(tb){return <button key={tb.k} onClick={function(){setResTab(tb.k)}} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:resTab===tb.k?700:500,background:resTab===tb.k?T.w:"transparent",color:resTab===tb.k?T.nv:T.txM,boxShadow:resTab===tb.k?"0 1px 3px rgba(0,0,0,.08)":"none",fontFamily:T.ui,transition:"all .2s"}}>{tb.l}</button>})}
         </div>
         {resTab==="audit"&&auditTrail&&<div style={Object.assign({},S.card,{overflow:"hidden"})}>
           <div style={{padding:"14px 20px",background:"linear-gradient(135deg,#1E3A5F,#2D4A7A)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -847,6 +849,39 @@ function ResultsView(props) {
                         </div>;
                       })}
                     </div>}
+                    {/* Test Documentation */}
+                    <div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                      <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Test Documentation — Pre-Migration"}</div>
+                      <div style={{padding:"12px 16px",fontSize:10,color:T.txM,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:4}}>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Methodology:"}</span>
+                          <span>{"Playwright browser automation — headless Chromium capture"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Viewport:"}</span>
+                          <span>{"1280×720px (desktop standard)"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Captured At:"}</span>
+                          <span>{pre.capturedAt?new Date(pre.capturedAt).toLocaleString():"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Duration:"}</span>
+                          <span>{(pre.durationMs||0)+"ms"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Routes Tested:"}</span>
+                          <span>{(pre.routeCount||0)+" routes"+(pre.routes?" ("+pre.routes.join(", ")+")":"")}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Screenshots:"}</span>
+                          <span>{(pre.screenshotRefs?pre.screenshotRefs.length:0)+" captured"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"JS Errors:"}</span>
+                          <span style={{color:(pre.jsErrors||[]).length>0?T.r:T.g}}>{(pre.jsErrors||[]).length>0?(pre.jsErrors.length+" errors detected"):"None detected"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"DOM Analysis:"}</span>
+                          <span>{pre.domSummary?(pre.domSummary.nodeCount+" nodes, "+pre.domSummary.uniqueTags+" unique tags"+(pre.domSummary.depth?", depth "+pre.domSummary.depth:"")):"Not available"}</span>
+                        </div>
+                        {pre.metrics&&<div style={{marginTop:4,padding:"8px 12px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL}}>
+                          <div style={{fontSize:9,fontWeight:700,color:T.txD,marginBottom:4}}>{"Performance Metrics"}</div>
+                          <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:9}}>
+                            {pre.metrics.loadTime!=null&&<span>{"Load: "+pre.metrics.loadTime+"ms"}</span>}
+                            {pre.metrics.domContentLoaded!=null&&<span>{"DOMContentLoaded: "+pre.metrics.domContentLoaded+"ms"}</span>}
+                            {pre.metrics.firstPaint!=null&&<span>{"First Paint: "+pre.metrics.firstPaint+"ms"}</span>}
+                            {pre.metrics.largestContentfulPaint!=null&&<span>{"LCP: "+pre.metrics.largestContentfulPaint+"ms"}</span>}
+                          </div>
+                        </div>}
+                      </div>
+                    </div>
                   </React.Fragment>;
                 })()}
 
@@ -880,6 +915,39 @@ function ResultsView(props) {
                         </div>;
                       })}
                     </div>}
+                    {/* Test Documentation */}
+                    <div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                      <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Test Documentation — Post-Migration"}</div>
+                      <div style={{padding:"12px 16px",fontSize:10,color:T.txM,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:4}}>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Methodology:"}</span>
+                          <span>{"Playwright browser automation — headless Chromium capture"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Viewport:"}</span>
+                          <span>{"1280×720px (desktop standard)"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Captured At:"}</span>
+                          <span>{post.capturedAt?new Date(post.capturedAt).toLocaleString():"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Duration:"}</span>
+                          <span>{(post.durationMs||0)+"ms"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Routes Tested:"}</span>
+                          <span>{(post.routeCount||0)+" routes"+(post.routes?" ("+post.routes.join(", ")+")":"")}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Screenshots:"}</span>
+                          <span>{(post.screenshotRefs?post.screenshotRefs.length:0)+" captured"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"JS Errors:"}</span>
+                          <span style={{color:(post.jsErrors||[]).length>0?T.r:T.g}}>{(post.jsErrors||[]).length>0?(post.jsErrors.length+" errors detected"):"None detected"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"DOM Analysis:"}</span>
+                          <span>{post.domSummary?(post.domSummary.nodeCount+" nodes, "+post.domSummary.uniqueTags+" unique tags"+(post.domSummary.depth?", depth "+post.domSummary.depth:"")):"Not available"}</span>
+                        </div>
+                        {post.metrics&&<div style={{marginTop:4,padding:"8px 12px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL}}>
+                          <div style={{fontSize:9,fontWeight:700,color:T.txD,marginBottom:4}}>{"Performance Metrics"}</div>
+                          <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:9}}>
+                            {post.metrics.loadTime!=null&&<span>{"Load: "+post.metrics.loadTime+"ms"}</span>}
+                            {post.metrics.domContentLoaded!=null&&<span>{"DOMContentLoaded: "+post.metrics.domContentLoaded+"ms"}</span>}
+                            {post.metrics.firstPaint!=null&&<span>{"First Paint: "+post.metrics.firstPaint+"ms"}</span>}
+                            {post.metrics.largestContentfulPaint!=null&&<span>{"LCP: "+post.metrics.largestContentfulPaint+"ms"}</span>}
+                          </div>
+                        </div>}
+                      </div>
+                    </div>
                   </React.Fragment>;
                 })()}
 
@@ -928,8 +996,136 @@ function ResultsView(props) {
                         </div>}
                       </div>;
                     })}
+                    {/* Comparison Test Summary */}
+                    <div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+                      <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Comparison Test Summary"}</div>
+                      <div style={{padding:"12px 16px",fontSize:10,color:T.txM,display:"flex",flexDirection:"column",gap:8}}>
+                        <div style={{display:"grid",gridTemplateColumns:"140px 1fr",gap:4}}>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Comparison Method:"}</span>
+                          <span>{"Pixel-level diff (pixelmatch) + DOM structural analysis"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Routes Compared:"}</span>
+                          <span>{maxRoutes+" routes"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Visual Match:"}</span>
+                          <span>{compData.visualScore!=null?compData.visualScore+"%":"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"DOM Similarity:"}</span>
+                          <span>{compData.domSimilarity!=null?compData.domSimilarity+"%":"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Functional Score:"}</span>
+                          <span>{compData.functionalScore!=null?compData.functionalScore+"%":"N/A"}</span>
+                          <span style={{fontWeight:700,color:T.txD}}>{"Composite Score:"}</span>
+                          <span style={{fontWeight:700,color:compData.compositeScore>=80?T.g:compData.compositeScore>=60?T.y:T.r}}>{compData.compositeScore!=null?compData.compositeScore+"/100":"N/A"}</span>
+                        </div>
+                        {rrs.length>0&&<div style={{marginTop:4}}>
+                          <div style={{fontSize:9,fontWeight:700,color:T.txD,marginBottom:4}}>{"Per-Route Results"}</div>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:9}}>
+                            <thead><tr style={{background:T.cBg}}>{["Route","Match %","Verdict","Mismatched Px"].map(function(h,hi){return <th key={hi} style={{padding:"4px 8px",textAlign:"left",fontWeight:700,color:T.txD,borderBottom:"1px solid "+T.bdL}}>{h}</th>})}</tr></thead>
+                            <tbody>{rrs.map(function(rr,ri){return <tr key={ri} style={{borderBottom:"1px solid "+T.bdL}}>
+                              <td style={{padding:"4px 8px",fontFamily:T.f}}>{rr.route||"/"}</td>
+                              <td style={{padding:"4px 8px",fontWeight:700,color:rr.matchPct>=90?T.g:rr.matchPct>=70?T.y:T.r}}>{rr.matchPct+"%"}</td>
+                              <td style={{padding:"4px 8px"}}><span style={{padding:"1px 6px",borderRadius:4,fontSize:8,fontWeight:700,background:rr.verdict==="PASS"?T.okBg:rr.verdict==="WARN"?T.warnBg:T.errBg,color:rr.verdict==="PASS"?T.g:rr.verdict==="WARN"?T.y:T.r}}>{rr.verdict}</span></td>
+                              <td style={{padding:"4px 8px",fontFamily:T.f}}>{(rr.mismatchPixels||0).toLocaleString()}</td>
+                            </tr>})}</tbody>
+                          </table>
+                        </div>}
+                      </div>
+                    </div>
                   </React.Fragment>;
                 })()}
+              </div>
+            </div>}
+          </div>;
+        })()}
+        {resTab==="testing"&&(function(){
+          var qd = qaTests;
+          var hasQA = !!(qd && (qd.pre || qd.post));
+
+          if (!hasQA) return <div style={{padding:40,textAlign:"center",color:T.txD}}>
+            <div style={{fontSize:32,marginBottom:8}}>{"\uD83E\uDDEA"}</div>
+            <div style={{fontSize:12}}>{"No QA test data available"}</div>
+            <div style={{fontSize:10,marginTop:4}}>{"QA tests run automatically during migration"}</div>
+          </div>;
+
+          var pre = qd.pre && qd.pre.ok ? qd.pre.virtual : null;
+          var post = qd.post && qd.post.ok ? qd.post.virtual : null;
+          var comp = qd.comparison;
+
+          return <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
+            {/* Summary banner */}
+            {comp&&<div style={{padding:"12px 16px",borderRadius:10,background:comp.preservationRate>=80?T.okBg:comp.preservationRate>=60?T.warnBg:T.errBg,border:"1px solid "+(comp.preservationRate>=80?T.okBd:comp.preservationRate>=60?T.warnBd:T.errBd),display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontSize:28,fontWeight:900,fontFamily:T.f,color:comp.preservationRate>=80?T.g:comp.preservationRate>=60?T.y:T.r}}>{comp.preservationRate+"%"}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.nv}}>{"Behavioral Preservation Rate"}</div>
+                <div style={{fontSize:9,color:T.txM}}>{"Equivalent: "+comp.summary.equivalent+" | Different: "+comp.summary.different+" | Missing: "+comp.summary.missing}</div>
+              </div>
+            </div>}
+
+            {/* Stats grid */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+              {[
+                {l:"Pre Tests",v:pre?pre.summary.totalTests:0,c:"#6366F1"},
+                {l:"Post Tests",v:post?post.summary.totalTests:0,c:"#8B5CF6"},
+                {l:"Bugs Found",v:(pre?pre.summary.bugsFound:0)+(post?post.summary.bugsFound:0),c:"#EF4444"},
+                {l:"High Confidence",v:post?post.summary.highConfidence:0,c:"#059669"}
+              ].map(function(m,mi){return <div key={mi} style={{padding:"12px 10px",borderRadius:10,background:T.cBg,border:"1px solid "+T.bdL,textAlign:"center"}}>
+                <div style={{fontSize:7,fontWeight:700,color:T.txD,textTransform:"uppercase"}}>{m.l}</div>
+                <div style={{fontSize:20,fontWeight:900,color:m.c,fontFamily:T.f,marginTop:2}}>{m.v}</div>
+              </div>})}
+            </div>
+
+            {/* Function-by-function comparison */}
+            {comp&&comp.comparisons&&<div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"Function Comparison (Pre vs Post)"}</div>
+              <div style={{maxHeight:400,overflowY:"auto"}}>
+                {comp.comparisons.map(function(fn,fi){
+                  var statusColor = fn.status==="equivalent"?T.g:fn.status==="missing"?"#EF4444":"#D97706";
+                  return <div key={fi} style={{borderBottom:"1px solid "+T.bdL,padding:"10px 16px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                      <span style={{fontSize:11,fontWeight:700,color:T.nv}}>{fn.name}</span>
+                      <span style={{fontSize:9,color:T.txD}}>{fn.file}</span>
+                      <span style={{marginLeft:"auto",padding:"2px 8px",borderRadius:4,fontSize:9,fontWeight:700,background:fn.status==="equivalent"?T.okBg:fn.status==="missing"?T.errBg:T.warnBg,color:statusColor}}>{fn.status.toUpperCase()}</span>
+                    </div>
+                    {fn.cases&&fn.cases.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                      {fn.cases.map(function(c,ci){
+                        var cColor = c.status==="equivalent"?"#059669":c.status==="different"?"#D97706":"#EF4444";
+                        return <div key={ci} style={{padding:"3px 8px",borderRadius:4,fontSize:8,background:T.cBg,border:"1px solid "+T.bdL}} title={c.label}>
+                          <span style={{color:cColor,fontWeight:700}}>{c.status==="equivalent"?"\u2713":c.status==="different"?"\u0394":"\u2717"}</span>
+                          <span style={{marginLeft:4,color:T.txM}}>{c.label||("Case "+(ci+1))}</span>
+                        </div>
+                      })}
+                    </div>}
+                  </div>
+                })}
+              </div>
+            </div>}
+
+            {/* Function details — Post migration */}
+            {post&&post.functions&&<div style={{borderRadius:10,border:"1px solid "+T.bdL,overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",background:T.cBg,borderBottom:"1px solid "+T.bdL,fontSize:12,fontWeight:700,color:T.nv}}>{"QA Test Details (Post-Migration)"}</div>
+              <div style={{maxHeight:500,overflowY:"auto"}}>
+                {post.functions.map(function(fn,fi){
+                  return <div key={fi} style={{borderBottom:"1px solid "+T.bdL,padding:"12px 16px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <span style={{fontSize:12,fontWeight:800,color:T.nv}}>{fn.name}</span>
+                      <span style={{fontSize:9,color:T.txD}}>{fn.file}</span>
+                      <span style={{fontSize:8,padding:"1px 6px",borderRadius:3,background:T.blP,color:T.bl}}>{fn.returnType||"void"}</span>
+                    </div>
+                    <div style={{fontSize:9,color:T.txM,marginBottom:8}}>{fn.description}</div>
+                    {fn.tests&&fn.tests.map(function(t,ti){
+                      var confColor = t.confidence==="high"?"#059669":t.confidence==="medium"?"#D97706":"#EF4444";
+                      return <div key={ti} style={{marginBottom:6,padding:"8px 10px",borderRadius:6,background:T.cBg,border:"1px solid "+T.bdL}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                          <span style={{fontSize:9,fontWeight:700,color:T.nv}}>{t.label||("Test "+(ti+1))}</span>
+                          <span style={{marginLeft:"auto",fontSize:8,fontWeight:700,color:confColor}}>{t.confidence}</span>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:9}}>
+                          <div><span style={{color:T.txD}}>{"Input: "}</span><code style={{fontFamily:T.f,color:T.bl,fontSize:8}}>{typeof t.input==="string"?t.input.slice(0,80):JSON.stringify(t.input).slice(0,80)}</code></div>
+                          <div><span style={{color:T.txD}}>{"Predicted: "}</span><code style={{fontFamily:T.f,color:"#059669",fontSize:8}}>{typeof t.predicted==="string"?t.predicted.slice(0,80):JSON.stringify(t.predicted).slice(0,80)}</code></div>
+                        </div>
+                        {t.trace&&<div style={{marginTop:4,fontSize:8,color:T.txD,fontStyle:"italic"}}>{typeof t.trace==="string"?t.trace.slice(0,150):""}</div>}
+                        {t.bugs&&t.bugs!=="null"&&t.bugs!==null&&<div style={{marginTop:4,padding:"3px 6px",borderRadius:4,background:T.errBg,fontSize:8,color:T.r}}>{"Bug: "+t.bugs}</div>}
+                      </div>
+                    })}
+                  </div>
+                })}
               </div>
             </div>}
           </div>;

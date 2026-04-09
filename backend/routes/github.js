@@ -71,7 +71,7 @@ router.get('/repos/:owner/:repo/commits', async (req, res) => {
     const { owner, repo } = req.params;
     const sha = req.query.sha || 'main';
     const token = req.headers['x-github-token'];
-    const data = await ghFetch(`/repos/${owner}/${repo}/commits?sha=${sha}&per_page=10`, token);
+    const data = await ghFetch(`/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(sha)}&per_page=10`, token);
     res.json(data);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -85,7 +85,7 @@ router.get('/repos/:owner/:repo/contents/*', async (req, res) => {
     const filePath = req.params[0];
     const ref = req.query.ref || 'main';
     const token = req.headers['x-github-token'];
-    const data = await ghFetch(`/repos/${owner}/${repo}/contents/${filePath}?ref=${ref}`, token);
+    const data = await ghFetch(`/repos/${owner}/${repo}/contents/${filePath}?ref=${encodeURIComponent(ref)}`, token);
     res.json(data);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });

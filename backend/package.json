@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch server.js",
+    "dev": "node --watch --watch-path=./server.js --watch-path=./routes --watch-path=./services --watch-path=./middleware server.js",
     "start": "node server.js"
   },
   "dependencies": {
@@ -12,10 +12,14 @@
     "dotenv": "^16.4.0",
     "express": "^4.19.0",
     "express-rate-limit": "^7.3.0",
+    "helmet": "^8.1.0",
     "node-fetch": "^3.3.2",
-    "playwright-core": "^1.49.0",
     "pixelmatch": "^6.0.0",
+    "playwright-core": "^1.49.0",
     "pngjs": "^7.0.0",
-    "vite": "^5.4.0"
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "vite": "^5.4.21"
   }
 }

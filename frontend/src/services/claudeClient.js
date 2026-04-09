@@ -11,36 +11,60 @@ export function setCancelled(v) { _cancelled = v; }
 export function setActiveController(v) { _activeController = v; }
 export function resetTks() { _tks = {i:0,o:0,calls:0,last:{i:0,o:0}}; }
 
+// ═══ Client-side rate limiter — uses Provider Profiles ═══
+import { getProfileFromModel, getProviderFromModel } from "../config/providerProfiles.js";
+import { canCall, recordSuccess, recordFailure, getState } from "./circuitBreaker.js";
+
+var _lastCallMs = 0;
+
+async function throttle(mid) {
+  var profile = getProfileFromModel(mid);
+  var minGap = profile.throttleMs || 0;
+  if (minGap <= 0) return;
+  var now = Date.now();
+  var elapsed = now - _lastCallMs;
+  if (elapsed < minGap) {
+    await new Promise(function(ok) { setTimeout(ok, minGap - elapsed); });
+  }
+  _lastCallMs = Date.now();
+}
+
 export async function callClaude(sys,usr,mid,mt,opts) {
   var o=opts||{};
   if (_cancelled) throw new Error("Migration cancelled");
-  var maxRetries=o.retries!==undefined?o.retries:1;
-  var timeout=o.timeout||60000; // 60s default — no call should hang
+  var profile=getProfileFromModel(mid);
+  var maxRetries=o.retries!==undefined?o.retries:profile.retryConfig.maxRetries;
+  var isSlowProvider=mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini-2.5"));
+  var timeout=o.timeout||(isSlowProvider?120000:60000);
   for (var attempt=0;attempt<=maxRetries;attempt++) {
     if (_cancelled) throw new Error("Migration cancelled");
+    var provider=getProviderFromModel(mid);if(!canCall(provider)){var cbState=getState(provider);throw new Error("Provider "+provider+" circuit open — retry in "+Math.round((cbState.remainingMs||0)/1000)+"s");}
+    var maxOut=profile.maxOutputTokens||8192;
+    var defaultMt=Math.min(maxOut,mid&&(mid.startsWith("deepseek")||mid.startsWith("gemini"))?8000:4000);
     var controller=new AbortController();
     _activeController=controller; // expose so cancel button can abort
     var timer=setTimeout(function(){controller.abort()},timeout);
     try {
+      await throttle(mid);
       var r = await fetch("/api/migrate",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||4000,system:sys,messages:[{role:"user",content:usr}]}),
+        body:JSON.stringify({model:mid||"claude-sonnet-4-20250514",max_tokens:mt||defaultMt,system:sys,messages:[{role:"user",content:usr}],provider:getProviderFromModel(mid)}),
         signal:controller.signal
       });
       clearTimeout(timer);
       _activeController=null;
       if (_cancelled) throw new Error("Migration cancelled");
-      if (r.status===429||r.status===529||r.status===503) { if(attempt<maxRetries){var backoff=r.status===429?Math.min(15000,3000*Math.pow(2,attempt)):2000;await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
-      if (!r.ok) throw new Error("API "+r.status);
+      if (r.status===429||r.status===529||r.status===503) { recordFailure(provider,r.status);if(attempt<maxRetries){var baseBack=profile.retryConfig.baseBackoff;var maxBack=profile.retryConfig.maxBackoff;var backoff=r.status===429?Math.min(maxBack,baseBack*Math.pow(2,attempt)):2000;var retryAfter=r.headers&&r.headers.get?r.headers.get("retry-after"):null;if(retryAfter){var ra=parseInt(retryAfter,10);if(!isNaN(ra)&&ra>0&&ra<300)backoff=ra*1000;}console.log("[Rate Limit] "+getProviderFromModel(mid)+" "+r.status+" — waiting "+Math.round(backoff/1000)+"s (attempt "+(attempt+1)+"/"+maxRetries+")");if(o.onRetry){o.onRetry({attempt:attempt+1,maxAttempts:maxRetries,waitMs:backoff,provider:getProviderFromModel(mid),status:r.status});}await new Promise(function(ok){setTimeout(ok,backoff)});continue;} throw new Error("API overloaded ("+r.status+")"); }
+      if (!r.ok) { recordFailure(provider,r.status); throw new Error("API "+r.status); }
       var d = await r.json();
       if (d.usage) { _tks.i+=(d.usage.input_tokens||0); _tks.o+=(d.usage.output_tokens||0); _tks.calls++; _tks.last={i:d.usage.input_tokens||0,o:d.usage.output_tokens||0}; }
-      if (d.stop_reason==="max_tokens"&&attempt<maxRetries) { mt=Math.min(16000,Math.round((mt||4000)*1.5)); continue; }
-      return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");
+      if (d.stop_reason==="max_tokens"&&attempt<maxRetries) { var newMt=Math.min(maxOut,Math.round((mt||defaultMt)*1.5)); if(newMt<=(mt||defaultMt)){recordSuccess(provider);return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");} mt=newMt; continue; }
+      recordSuccess(provider);return d.content.map(function(b){return b.type==="text"?b.text:""}).filter(Boolean).join("\n");
     } catch(e) {
       clearTimeout(timer);
       _activeController=null;
       if (_cancelled) throw new Error("Migration cancelled");
-      if (e.name==="AbortError") {
+      if (e.name==="AbortError") { recordFailure(provider,0);
         if (attempt<maxRetries) continue;
         throw new Error("Timeout after "+Math.round(timeout/1000)+"s");
       }

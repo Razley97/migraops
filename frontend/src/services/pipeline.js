@@ -1,8 +1,13 @@
 import { LANGS } from "../config/languages.js";
 import { MODELS } from "../config/models.js";
 import { mkDiff, mkRisks } from "./utils.js";
+import { runVirtualQA, compareVirtualQA } from "./qaHelpers.js";
 import { calcCapacity, resetTks, _tks, _activeController, setCancelled as setClaudeCancelled, setActiveController as setClaudeController } from "./claudeClient.js";
 import { doCodebaseAnalysis, doFilePlan, doMigrate, doDependencyAudit, doConsolidation, doIntegrationCheck, doIntegrationFix, mapTargetFile } from "./migrationPhases.js";
+import { shouldRunInlineQA, shouldRunSecurityAudit, shouldRunLiteQA, isFreeProvider, getBudgetTier } from "./budgetTier.js";
+import { doInlineQA, formatQAFeedback } from "./inlineQA.js";
+import { doSecurityAudit } from "./securityAuditPhase.js";
+import { validateLite } from "./liteValidator.js";
 
 // ══════════════════════════════════════════════════════════════
 // MigraOps Pipeline — Extensible migration engine
@@ -23,6 +28,47 @@ export function registerPhase(position, id, name, handler) {
 
 export function getRegisteredPhases() {
   return registeredPhases.slice();
+}
+
+// ── Free-tier resilience helpers ──
+// isFreeProvider imported from budgetTier.js (single source of truth)
+
+async function wrapPhase(fn, phaseName, emit, isFree) {
+  var maxAttempts = 5;
+  var attempt = 0;
+  while (attempt <= maxAttempts) {
+    try { return await fn(); }
+    catch(e) {
+      var isRateLimit = e.message && (e.message.includes("429") || e.message.includes("overloaded"));
+      var isCircuitOpen = e.message && e.message.includes("circuit open");
+      // Only retry rate-limit errors for free-tier; propagate everything else
+      if (!isFree || !isRateLimit || isCircuitOpen) throw e;
+      attempt++;
+      if (attempt > maxAttempts) throw e;
+      // Backoff progresivo: 30s, 45s, 60s, 60s, 60s, ...
+      var cooldown = Math.min(60000, 30000 + (attempt - 1) * 15000);
+      if (emit && emit.setLogs) emit.setLogs(function(p) {
+        return p.concat([{
+          type: "rate_limit", phase: phaseName, waitMs: cooldown, ts: Date.now(),
+          attempt: attempt, maxAttempts: maxAttempts,
+          msg: "Rate limit en " + phaseName + " — reintento #" + attempt + "/" + maxAttempts + " en " + Math.round(cooldown / 1000) + "s"
+        }]);
+      });
+      await new Promise(function(ok) { setTimeout(ok, cooldown); });
+      // Verificar cancelación después del cooldown
+      if (emit && emit.cancelRef && emit.cancelRef.current) {
+        throw new Error("Migration cancelled during rate-limit wait");
+      }
+    }
+  }
+  throw new Error("Phase " + phaseName + " failed after " + maxAttempts + " retries");
+}
+
+async function freeTierCooldown(mid, emit, phase) {
+  if (!isFreeProvider(mid)) return;
+  var wait = 15000;
+  if (emit && emit.setLogs) emit.setLogs(function(p) { return p.concat([{ type: "cooldown", phase: phase, waitMs: wait, ts: Date.now(), msg: "Pausa entre fases (" + Math.round(wait / 1000) + "s)" }]); });
+  await new Promise(function(ok) { setTimeout(ok, wait); });
 }
 
 // ── Audit trail helpers ──
@@ -155,11 +201,14 @@ export async function runMigration(config, emit) {
     emit.setProg(2);
     var phA = phaseStart(audit, "A", "Codebase Analysis");
     audit.apiCalls++;
-    var cbCtx = await doCodebaseAnalysis(files, sL, sV, tL, tV, mod, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } });
+    var cbCtx = await wrapPhase(function() { return doCodebaseAnalysis(files, sL, sV, tL, tV, mod, { useChain: getBudgetTier(mod)==="full", onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "A-analysis", emit, isFreeProvider(mod));
+    if (cbCtx.skipped) cbCtx = { ok: false, error: "Analysis skipped (rate limit)", analysis: {}, isCross: sL !== tL };
     phaseEnd(phA, cbCtx.ok ? "done" : "error", { detail: cbCtx.ok ? (cbCtx.analysis.purpose || "OK") : "Error", ok: cbCtx.ok });
     emit.setCbA(cbCtx);
     emit.setLogs(function(p) { return p.map(function(l) { return l.phase === "analysis" ? Object.assign({}, l, { st: "done", detail: cbCtx.ok ? (cbCtx.analysis.purpose || "") : "Error", durationMs: Date.now() - l.ts }) : l; }); });
     emit.setProg(W.a);
+    // Cooldown after analysis for free-tier — let rate limit reset before per-file work
+    if (!cbCtx.ok && isFreeProvider(mod)) { await freeTierCooldown(mod, emit, "post-analysis-recovery"); }
 
     // ═══ GATE: Post-Analysis ═══
     if (!emit.cancelRef.current) {
@@ -254,6 +303,98 @@ export async function runMigration(config, emit) {
       var r = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null, filePlan, cap);
       var d = mkDiff(f.content, r.migrated);
       rs.push(Object.assign({}, f, r, { diff: d, targetName: targetFN, targetPath: targetPath, isCross: isCross }));
+
+      // ── Lite QA validation (all tiers, no API call) ──
+      if (shouldRunLiteQA(mod) && r.engine !== "fallback" && !emit.cancelRef.current) {
+        var liteResult = validateLite(f.content, r.migrated, sL, tL);
+        rs[rs.length - 1].liteQA = liteResult;
+        if (!liteResult.pass) {
+          emit.setLogs(function(p) { return p.map(function(l) {
+            if (l.file !== thisName || l.type !== "file") return l;
+            return Object.assign({}, l, { st: "lite-qa-failed", liteScore: liteResult.score, liteIssues: liteResult.issues.length });
+          }); });
+          // Re-migrate with lite feedback if critical issues and no LLM QA available
+          var hasCritical = liteResult.issues.some(function(i) { return i.severity === "critical"; });
+          if (hasCritical && !shouldRunInlineQA(mod) && !emit.cancelRef.current) {
+            emit.setLogs(function(p) { return p.map(function(l) {
+              if (l.file !== thisName || l.type !== "file") return l;
+              return Object.assign({}, l, { st: "re-migrating" });
+            }); });
+            audit.apiCalls++;
+            var liteFeedback = formatQAFeedback(liteResult);
+            var rLite = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null, Object.assign({}, filePlan, { qaFeedback: liteFeedback }), cap);
+            var dLite = mkDiff(f.content, rLite.migrated);
+            rs[rs.length - 1] = Object.assign({}, f, rLite, { diff: dLite, targetName: targetFN, targetPath: targetPath, isCross: isCross, liteQARetried: true, liteQA: liteResult });
+            r = rLite;
+          }
+        } else {
+          emit.setLogs(function(p) { return p.map(function(l) {
+            if (l.file !== thisName || l.type !== "file") return l;
+            return Object.assign({}, l, { liteScore: liteResult.score });
+          }); });
+        }
+      }
+
+      // ── Inline QA validation (full tier only) ──
+      if (shouldRunInlineQA(mod) && r.engine !== "fallback" && !emit.cancelRef.current) {
+        emit.setActiveAgent("qa");
+        emit.setLogs(function(p) { return p.map(function(l) {
+          if (l.file !== thisName || l.type !== "file") return l;
+          return Object.assign({}, l, { st: "qa-validating" });
+        }); });
+        audit.apiCalls++;
+        var qaResult = await wrapPhase(function() { return doInlineQA(f.content, r.migrated, thisName, targetFN, filePlan, sL, sV, tL, tV, mod, cap); }, "B-inlineQA-" + thisName, emit, false);
+        if (qaResult && qaResult.ok && !qaResult.skipped) {
+          if (qaResult.pass) {
+            emit.setLogs(function(p) { return p.map(function(l) {
+              if (l.file !== thisName || l.type !== "file") return l;
+              return Object.assign({}, l, { st: "qa-passed", qaScore: qaResult.score });
+            }); });
+          } else {
+            emit.setLogs(function(p) { return p.map(function(l) {
+              if (l.file !== thisName || l.type !== "file") return l;
+              return Object.assign({}, l, { st: "qa-failed", qaScore: qaResult.score, qaIssues: (qaResult.issues || []).length });
+            }); });
+            // Re-migrate with QA feedback
+            if (qaResult.issues && qaResult.issues.length > 0 && !emit.cancelRef.current) {
+              emit.setActiveAgent("developer");
+              emit.setLogs(function(p) { return p.map(function(l) {
+                if (l.file !== thisName || l.type !== "file") return l;
+                return Object.assign({}, l, { st: "re-migrating" });
+              }); });
+              audit.apiCalls++;
+              var qaFeedbackStr = formatQAFeedback(qaResult);
+              var r2 = await doMigrate(f.content, thisName, sL, sV, tL, tV, mod, pr, cbCtx, successfulSiblings, targetFN, isCross ? fileMap : null,
+                Object.assign({}, filePlan, { qaFeedback: qaFeedbackStr }), cap);
+              var d2 = mkDiff(f.content, r2.migrated);
+              rs[rs.length - 1] = Object.assign({}, f, r2, { diff: d2, targetName: targetFN, targetPath: targetPath, isCross: isCross, qaRetried: true });
+              r = r2;
+            }
+          }
+        }
+        emit.setActiveAgent("developer");
+      }
+
+      // Handle multi-file output: add additional files to results
+      if (r.additionalFiles && r.additionalFiles.length > 0) {
+        r.additionalFiles.forEach(function(af) {
+          rs.push({
+            name: f.name,
+            content: "",
+            path: f.path || f.name,
+            migrated: af.content,
+            diff: mkDiff("", af.content),
+            targetName: af.name,
+            targetPath: af.name,
+            isCross: isCross,
+            changes: ["Generated from " + f.name],
+            engine: "claude-ai",
+            isAdditionalFile: true
+          });
+        });
+        emit.setRes(rs.slice());
+      }
+
       var thisChanges = r.changes.length;
       fileEntry.completedAt = new Date().toISOString();
       fileEntry.durationMs = Date.now() - fileEntry.startMs;
@@ -269,6 +410,9 @@ export async function runMigration(config, emit) {
       }); });
       emit.setProg(Math.round(W.a + W.b * ((fileIdx + 1) / fc)));
       emit.setRes(rs.slice());
+
+      // Inter-file cooldown for free-tier — avoid 429 between files
+      if (fileIdx < fc - 1 && isFreeProvider(mod)) { await freeTierCooldown(mod, emit, "between-files"); }
 
       // ═══ GATE: Post-File ═══
       if (!emit.cancelRef.current && emit.gateResolveRef.current !== "skip") {
@@ -301,23 +445,54 @@ export async function runMigration(config, emit) {
       emit.setMigPhase("consolidation");
 
       // B2a: Dependency Audit
+      await freeTierCooldown(mod, emit, "B-to-B2");
       var phB2a = phaseStart(audit, "B2a", "Dependency Audit", { fileCount: fc });
       emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "consolidation", subPhase: "audit", st: "run", ts: Date.now(), label: "Auditing cross-file dependencies..." }]); });
       emit.setProg(W.a + W.b + 1);
       audit.apiCalls++;
-      var depAudit = await doDependencyAudit(orderedFiles, rs, sL, sV, tL, tV, mod);
+      var depAudit = await wrapPhase(function() { return doDependencyAudit(orderedFiles, rs, sL, sV, tL, tV, mod); }, "B2a-audit", emit, isFreeProvider(mod));
+      if (depAudit.skipped) { depAudit = { ok: false, audit: { issues: [], connections: [] } }; }
       var auditIssues = depAudit.ok && depAudit.audit ? (depAudit.audit.issues || []).length : 0;
       var auditConns = depAudit.ok && depAudit.audit ? (depAudit.audit.connections || []).length : 0;
       var auditBroken = depAudit.ok && depAudit.audit ? (depAudit.audit.connections || []).filter(function(c) { return !c.compatible; }).length : 0;
       phaseEnd(phB2a, "done", { issues: auditIssues, connections: auditConns, broken: auditBroken });
       emit.setLogs(function(p) { return p.map(function(l) { return l.subPhase === "audit" && l.type === "phase" ? Object.assign({}, l, { st: "done", issues: auditIssues, connections: auditConns, broken: auditBroken, durationMs: Date.now() - l.ts }) : l; }); });
 
+      // B2-security: Security Audit (full tier only)
+      if (shouldRunSecurityAudit(mod) && depAudit.ok && !emit.cancelRef.current) {
+        emit.setActiveAgent("security");
+        var phSec = phaseStart(audit, "B2-sec", "Security Audit", { fileCount: fc });
+        emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "consolidation", subPhase: "security", st: "run", ts: Date.now(), label: "Security audit..." }]); });
+        audit.apiCalls++;
+        var secResult = await wrapPhase(function() { return doSecurityAudit(orderedFiles, rs, sL, sV, tL, tV, mod); }, "B2-security", emit, false);
+        if (secResult && secResult.ok && secResult.findings && secResult.findings.length > 0) {
+          // Merge security findings into depAudit issues
+          if (!depAudit.audit) depAudit.audit = { issues: [], connections: [] };
+          if (!depAudit.audit.issues) depAudit.audit.issues = [];
+          secResult.findings.forEach(function(finding) {
+            depAudit.audit.issues.push({
+              files: [finding.file],
+              type: "security_" + finding.category,
+              detail: "[" + finding.severity.toUpperCase() + "] " + finding.detail,
+              fix: finding.fix
+            });
+          });
+          auditIssues = depAudit.audit.issues.length;
+        }
+        var secFindings = secResult && secResult.findings ? secResult.findings.length : 0;
+        var secOk = secResult && secResult.ok;
+        phaseEnd(phSec, secOk ? "done" : "error", { findings: secFindings, ok: secOk });
+        emit.setLogs(function(p) { return p.map(function(l) { return l.subPhase === "security" && l.type === "phase" ? Object.assign({}, l, { st: secOk ? "done" : "error", findings: secFindings, durationMs: Date.now() - l.ts }) : l; }); });
+        emit.setActiveAgent("developer");
+      }
+
       // B2b: Consolidation Fix
       var phB2b = phaseStart(audit, "B2b", "Consolidation Fix", { fileCount: fc, auditIssues: auditIssues });
       emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "consolidation", subPhase: "fix", st: "run", ts: Date.now(), label: "Fixing " + auditIssues + " issues across " + fc + " files..." }]); });
       emit.setProg(W.a + W.b + 3);
       audit.apiCalls++;
-      var consResult = await doConsolidation(orderedFiles, rs, sL, sV, tL, tV, mod, depAudit);
+      var consResult = await wrapPhase(function() { return doConsolidation(orderedFiles, rs, sL, sV, tL, tV, mod, depAudit); }, "B2b-consolidation", emit, isFreeProvider(mod));
+      if (consResult.skipped) { consResult = { ok: false, error: "skipped due to rate limits" }; }
       if (consResult.ok && consResult.files) {
         var consFixed = 0;
         rs = rs.map(function(r) {
@@ -350,7 +525,7 @@ export async function runMigration(config, emit) {
     }
 
     // ═══ PHASE C+D LOOP: Integration Check → Fix → Re-check ═══
-    var INT_PASS = 90, INT_MAX = 2;
+    var INT_PASS = 90, INT_MAX = getBudgetTier(mod) === "full" ? 2 : 1;
     emit.setActiveAgent("qa");
     emit.setMigPhase("integration");
     var intCheck = null, intIter = 0, prevCtx = null, prevIssues = null, lastScore = -1;
@@ -369,7 +544,9 @@ export async function runMigration(config, emit) {
       var progC = W.a + W.b + W.b2 + Math.round((W.c + W.d) * (ii / (INT_MAX))) + 2;
       emit.setProg(progC);
       audit.apiCalls++;
-      intCheck = await doIntegrationCheck(files, rs, sL, sV, tL, tV, mod, uiL, prevCtx, { useChain: true, onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } });
+      await freeTierCooldown(mod, emit, "B2-to-C");
+      intCheck = await wrapPhase(function() { return doIntegrationCheck(files, rs, sL, sV, tL, tV, mod, uiL, prevCtx, { useChain: getBudgetTier(mod)==="full", onAgentChange: function(agentId) { emit.setActiveAgent(agentId); } }); }, "C-integration", emit, isFreeProvider(mod));
+      if (intCheck.skipped) { intCheck = { ok: false, result: { score: 0, issues: [], pass: false } }; break; }
       var intScore = intCheck.ok ? (intCheck.result.score || 0) : 0;
       var intIssues = intCheck.ok ? (intCheck.result.issues || []) : [];
       var intAllIssues = intIssues.length;
@@ -440,7 +617,9 @@ export async function runMigration(config, emit) {
       emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "qa", st: "run", iter: intIter, issues: fixableIssues.length, ts: Date.now() }]); });
       emit.setProg(progC + Math.round((W.c + W.d) / (INT_MAX * 2)));
       audit.apiCalls++;
-      var fixResult = await doIntegrationFix(files, rs, fixableIssues, sL, sV, tL, tV, mod, intIter, prevIssues);
+      await freeTierCooldown(mod, emit, "C-to-D");
+      var fixResult = await wrapPhase(function() { return doIntegrationFix(files, rs, fixableIssues, sL, sV, tL, tV, mod, intIter, prevIssues); }, "D-fix", emit, isFreeProvider(mod));
+      if (fixResult.skipped) { fixResult = { ok: false, files: {} }; }
       var fixedFileCount = 0;
       if (fixResult.ok && fixResult.files) {
         rs = rs.map(function(r) {
@@ -463,6 +642,54 @@ export async function runMigration(config, emit) {
         modifiedFiles: Object.keys(fixResult.files || {}),
         untouchedFiles: rs.filter(function(r) { return !(fixResult.files || {})[r.targetName || r.name] && !(fixResult.files || {})[r.name]; }).map(function(r) { return r.targetName || r.name; })
       };
+    }
+
+    // ═══ PHASE E: QA Testing — Virtual execution & comparison ═══
+    if (!emit.cancelRef.current && getBudgetTier(mod) === "full") {
+      emit.setActiveAgent("qa");
+      emit.setMigPhase("qa-testing");
+      var phE = phaseStart(audit, "E", "QA Testing");
+      emit.setLogs(function(p) { return p.concat([{ type: "phase", phase: "qa-testing", st: "run", ts: Date.now(), label: "Running virtual QA tests..." }]); });
+
+      try {
+        // E1: Virtual QA on source code
+        var sourceFiles = files.map(function(f) { return { name: f.name, content: f.content }; });
+        var preVQA = await runVirtualQA(sourceFiles, sL, sV, mod, "pre");
+
+        // E2: Virtual QA on migrated code
+        var migratedFiles = rs.map(function(r) { return { name: r.targetName || r.name, content: r.migrated }; });
+        var postVQA = await runVirtualQA(migratedFiles, tL, tV, mod, "post");
+
+        // E3: Compare pre vs post
+        var vqaComparison = null;
+        if (preVQA.ok && postVQA.ok) {
+          vqaComparison = compareVirtualQA(preVQA.virtual, postVQA.virtual);
+        }
+
+        audit.apiCalls += 2;
+
+        // Emit results to state
+        emit.setQaVPreR(preVQA.ok ? preVQA.virtual : null);
+        emit.setQaVPostR(postVQA.ok ? postVQA.virtual : null);
+
+        var qaTestData = {
+          pre: preVQA,
+          post: postVQA,
+          comparison: vqaComparison,
+          timestamp: new Date().toISOString()
+        };
+        emit.setQaTests(qaTestData);
+
+        var totalTests = (preVQA.ok ? preVQA.virtual.summary.totalTests : 0) + (postVQA.ok ? postVQA.virtual.summary.totalTests : 0);
+        var bugsFound = (preVQA.ok ? preVQA.virtual.summary.bugsFound : 0) + (postVQA.ok ? postVQA.virtual.summary.bugsFound : 0);
+        var preservationRate = vqaComparison ? vqaComparison.preservationRate : null;
+
+        phaseEnd(phE, "done", { totalTests: totalTests, bugsFound: bugsFound, preservationRate: preservationRate });
+        emit.setLogs(function(p) { return p.map(function(l) { return l.phase === "qa-testing" && l.type === "phase" ? Object.assign({}, l, { st: "done", totalTests: totalTests, bugsFound: bugsFound, preservationRate: preservationRate, durationMs: Date.now() - l.ts }) : l; }); });
+      } catch (qaErr) {
+        phaseEnd(phE, "error", { error: qaErr.message });
+        emit.setLogs(function(p) { return p.map(function(l) { return l.phase === "qa-testing" && l.type === "phase" ? Object.assign({}, l, { st: "error", detail: qaErr.message, durationMs: Date.now() - l.ts }) : l; }); });
+      }
     }
 
     // ── Set initial finalScore before post-phases so they can read/blend it ──
@@ -638,3 +865,6 @@ export function generatePDF(config, setPdfLd) {
   } catch(e) { console.error("PDF error:", e); }
   setPdfLd(false);
 }
+
+// ── Test-only exports ──
+export { wrapPhase as _wrapPhase };

@@ -9,6 +9,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -18,6 +19,8 @@ import healthRouter from './routes/health.js';
 import conversationRouter from './routes/conversation.js';
 import playwrightRouter from './routes/playwright.js';
 import { rateLimiter } from './middleware/rateLimit.js';
+import { requestId } from './middleware/requestId.js';
+import logger from './services/logger.js';
 
 dotenv.config();
 
@@ -28,10 +31,24 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ═══ Middleware ═══
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "https://api.anthropic.com", "https://api.github.com", "https://api.deepseek.com", "https://generativelanguage.googleapis.com", "https://api.groq.com"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }));
+
+app.use(requestId);
 
 // Playwright router BEFORE global body limit — screenshots exceed 2mb
 app.use('/api/playwright', playwrightRouter);
@@ -56,7 +73,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // ═══ Error handler ═══
 app.use((err, req, res, next) => {
-  console.error(`[ERROR] ${err.message}`);
+  logger.error(err.message, { requestId: req.requestId, status: err.status || 500 });
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
   });
@@ -72,6 +89,7 @@ app.listen(PORT, () => {
   ║   API:  ${process.env.ANTHROPIC_API_KEY ? '✅ Configured' : '❌ Missing ANTHROPIC_API_KEY'}        ║
   ╚══════════════════════════════════════╝
   `);
+  logger.info('MigraOps Backend started', { port: PORT, env: process.env.NODE_ENV || 'development' });
 });
 
 export default app;

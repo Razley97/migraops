@@ -15,8 +15,8 @@
     "concurrently": "^8.2.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "author": "SII Group Chile",
-  "license": "UNLICENSED"
+  "license": "SEE LICENSE IN LICENSE"
 }

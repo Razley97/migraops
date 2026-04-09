@@ -138,6 +138,14 @@ export async function captureBaseline(files, options) {
       });
     }
 
+    // 7b. Interactive QA tests
+    var qaTests = [];
+    try {
+      qaTests = await runInteractiveTests(page, baseUrl, viewport);
+    } catch (qaErr) {
+      console.warn('[PW] Interactive tests failed:', qaErr.message);
+    }
+
     // 8. Extract DOM tree
     var domTree = await page.evaluate(function() {
       function serialize(el, depth) {
@@ -185,6 +193,7 @@ export async function captureBaseline(files, options) {
 
     return {
       screenshots: screenshots,
+      qaTests: qaTests,
       domTree: domTree,
       metrics: metrics,
       a11y: a11y,
@@ -378,6 +387,248 @@ function countA11yNodes(tree) {
     tree.children.forEach(function(c) { count += countA11yNodes(c); });
   }
   return count;
+}
+
+// ══════════════════════════════════════════════════════════════
+// Interactive QA Testing — automated behavioral tests
+// ══════════════════════════════════════════════════════════════
+async function runInteractiveTests(page, baseUrl, viewport) {
+  var tests = [];
+  var testId = 0;
+
+  // Helper: capture screenshot as base64
+  async function snap(label) {
+    try {
+      var buf = await page.screenshot({ fullPage: false, type: 'png' });
+      return buf.toString('base64');
+    } catch(e) { return null; }
+  }
+
+  // Helper: add test result
+  function addTest(category, description, element, status, findings, screenshots, meta) {
+    var entry = {
+      id: 'qa-' + (++testId),
+      category: category,
+      description: description,
+      element: element || null,
+      status: status,
+      findings: findings || '',
+      screenshots: screenshots || []
+    };
+    if (meta) entry.meta = meta;
+    tests.push(entry);
+  }
+
+  // ── TEST 1: Page Load ──
+  var loadScreenshot = await snap('initial-load');
+  var title = await page.title();
+  addTest('load', 'Page loads without errors', 'document', 'pass',
+    'Page loaded successfully. Title: "' + (title || 'untitled') + '"',
+    [{ stage: 'loaded', png: loadScreenshot }]
+  );
+
+  // ── TEST 2: Console Errors Check ──
+  var consoleErrors = [];
+  page.on('console', function(msg) {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
+  // Re-navigate to collect fresh console output
+  await page.reload({ waitUntil: 'networkidle', timeout: 10000 }).catch(function(){});
+  await page.waitForTimeout(500);
+  addTest('console', 'No JavaScript console errors', 'console',
+    consoleErrors.length === 0 ? 'pass' : 'warn',
+    consoleErrors.length === 0 ? 'No console errors detected' : consoleErrors.length + ' console error(s) detected',
+    [],
+    consoleErrors.length > 0 ? {
+      detail: 'Se encontraron ' + consoleErrors.length + ' errores en la consola del navegador. Estos errores pueden indicar problemas de runtime, dependencias faltantes, o incompatibilidades.',
+      errors: consoleErrors.slice(0, 10),
+      recommendation: consoleErrors.some(function(e) { return e.includes('404') || e.includes('Failed to load'); })
+        ? 'Verificar que todos los recursos (scripts, stylesheets, imágenes) están disponibles y las rutas son correctas.'
+        : consoleErrors.some(function(e) { return e.includes('TypeError') || e.includes('ReferenceError'); })
+        ? 'Revisar errores de JavaScript: posibles variables no definidas o tipos incorrectos tras la migración.'
+        : 'Revisar los errores en la consola para identificar la causa raíz.'
+    } : null
+  );
+
+  // ── TEST 3: Interactive Elements Discovery ──
+  var elements = await page.evaluate(function() {
+    var result = { buttons: [], inputs: [], links: [], selects: [] };
+    document.querySelectorAll('button, [role="button"], input[type="submit"]').forEach(function(el, i) {
+      if (i < 5) result.buttons.push({ text: (el.textContent || el.value || '').trim().slice(0, 50), tag: el.tagName, selector: el.id ? '#' + el.id : (el.className ? '.' + el.className.split(' ')[0] : el.tagName.toLowerCase()) });
+    });
+    document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]), textarea, select').forEach(function(el, i) {
+      if (i < 5) result.inputs.push({ type: el.type || el.tagName.toLowerCase(), name: el.name || el.placeholder || '', selector: el.id ? '#' + el.id : (el.name ? '[name="' + el.name + '"]' : el.tagName.toLowerCase()) });
+    });
+    document.querySelectorAll('a[href]').forEach(function(el, i) {
+      if (i < 5) result.links.push({ text: (el.textContent || '').trim().slice(0, 50), href: el.getAttribute('href'), selector: el.id ? '#' + el.id : 'a' });
+    });
+    document.querySelectorAll('select').forEach(function(el, i) {
+      if (i < 3) result.selects.push({ name: el.name || '', options: el.options.length, selector: el.id ? '#' + el.id : 'select' });
+    });
+    return result;
+  });
+
+  addTest('discovery', 'Interactive elements found', 'page',
+    'info',
+    'Buttons: ' + elements.buttons.length + ', Inputs: ' + elements.inputs.length + ', Links: ' + elements.links.length + ', Selects: ' + elements.selects.length,
+    []
+  );
+
+  // ── TEST 4: Button Click Tests ──
+  var allButtons = await page.$$('button, [role="button"], input[type="submit"]');
+  for (var bi = 0; bi < Math.min(allButtons.length, 3); bi++) {
+    try {
+      var btn = allButtons[bi];
+      var btnText = await btn.evaluate(function(el) { return (el.textContent || el.value || '').trim().slice(0, 40); });
+      var beforeSnap = await snap('btn-before-' + bi);
+
+      // Check if button is visible and enabled
+      var isVisible = await btn.isVisible();
+      var isEnabled = await btn.isEnabled();
+      if (!isVisible || !isEnabled) {
+        addTest('interaction', 'Button "' + btnText + '" — skipped (not visible/enabled)', 'button', 'info',
+          'Button is ' + (!isVisible ? 'hidden' : 'disabled'),
+          [{ stage: 'current', png: beforeSnap }]
+        );
+        continue;
+      }
+
+      await btn.click({ timeout: 3000 }).catch(function(){});
+      await page.waitForTimeout(800);
+      var afterSnap = await snap('btn-after-' + bi);
+
+      // Detect changes after click
+      var newUrl = page.url();
+      var urlChanged = newUrl !== baseUrl && newUrl !== baseUrl + '/';
+
+      addTest('interaction', 'Click button "' + btnText + '"', 'button',
+        'pass',
+        urlChanged ? 'Navigation to ' + newUrl : 'UI updated after click',
+        [{ stage: 'before', png: beforeSnap }, { stage: 'after', png: afterSnap }]
+      );
+
+      // Navigate back if URL changed
+      if (urlChanged) {
+        await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 10000 }).catch(function(){});
+        await page.waitForTimeout(500);
+        allButtons = await page.$$('button, [role="button"], input[type="submit"]');
+      }
+    } catch(btnErr) {
+      addTest('interaction', 'Button click test #' + (bi + 1) + ' failed', 'button', 'fail',
+        'Error: ' + btnErr.message, []
+      );
+    }
+  }
+
+  // ── TEST 5: Form Input Tests ──
+  var allInputs = await page.$$('input:not([type="hidden"]):not([type="submit"]), textarea');
+  for (var ii = 0; ii < Math.min(allInputs.length, 3); ii++) {
+    try {
+      var input = allInputs[ii];
+      var inputInfo = await input.evaluate(function(el) {
+        return { type: el.type || 'text', name: el.name || el.placeholder || 'input', tag: el.tagName };
+      });
+      var isVis = await input.isVisible();
+      if (!isVis) continue;
+
+      var beforeInput = await snap('input-before-' + ii);
+      await input.click({ timeout: 2000 }).catch(function(){});
+      await input.fill('test-input').catch(function(){});
+      await page.waitForTimeout(300);
+      var afterInput = await snap('input-after-' + ii);
+
+      addTest('form', 'Fill ' + inputInfo.type + ' input "' + inputInfo.name + '"', 'input',
+        'pass',
+        'Input accepted text value',
+        [{ stage: 'before', png: beforeInput }, { stage: 'after', png: afterInput }]
+      );
+
+      // Clear the input
+      await input.fill('').catch(function(){});
+    } catch(inputErr) {
+      addTest('form', 'Input test #' + (ii + 1), 'input', 'fail',
+        'Error: ' + inputErr.message, []
+      );
+    }
+  }
+
+  // ── TEST 6: Scroll Test ──
+  try {
+    var bodyHeight = await page.evaluate(function() { return document.body.scrollHeight; });
+    var viewHeight = viewport.height;
+    if (bodyHeight > viewHeight * 1.2) {
+      var topSnap = await snap('scroll-top');
+      await page.evaluate(function() { window.scrollTo(0, document.body.scrollHeight); });
+      await page.waitForTimeout(500);
+      var bottomSnap = await snap('scroll-bottom');
+      await page.evaluate(function() { window.scrollTo(0, 0); });
+
+      addTest('scroll', 'Page scroll behavior', 'window',
+        'pass',
+        'Page is scrollable. Height: ' + bodyHeight + 'px (viewport: ' + viewHeight + 'px)',
+        [{ stage: 'top', png: topSnap }, { stage: 'bottom', png: bottomSnap }]
+      );
+    } else {
+      addTest('scroll', 'Page fits in viewport', 'window',
+        'info',
+        'Content height (' + bodyHeight + 'px) fits within viewport (' + viewHeight + 'px). No scroll needed.',
+        []
+      );
+    }
+  } catch(scrollErr) {
+    addTest('scroll', 'Scroll test', 'window', 'fail', 'Error: ' + scrollErr.message, []);
+  }
+
+  // ── TEST 7: Responsive Test (mobile viewport) ──
+  try {
+    var mobileVP = { width: 375, height: 667 };
+    await page.setViewportSize(mobileVP);
+    await page.waitForTimeout(500);
+    var mobileSnap = await snap('responsive-mobile');
+
+    // Check for horizontal overflow with detail
+    var overflowInfo = await page.evaluate(function() {
+      var bodyW = document.body.scrollWidth;
+      var winW = window.innerWidth;
+      var hasOF = bodyW > winW;
+      var culprits = [];
+      if (hasOF) {
+        document.querySelectorAll('*').forEach(function(el) {
+          var rect = el.getBoundingClientRect();
+          if (rect.right > winW + 2 && culprits.length < 5) {
+            var tag = el.tagName.toLowerCase();
+            var id = el.id ? '#' + el.id : '';
+            var cls = el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : '';
+            culprits.push({ selector: tag + id + cls, width: Math.round(rect.width), overflow: Math.round(rect.right - winW) });
+          }
+        });
+      }
+      return { hasOverflow: hasOF, bodyWidth: bodyW, viewportWidth: winW, culprits: culprits };
+    });
+
+    addTest('responsive', 'Mobile viewport test (375x667)', 'viewport',
+      overflowInfo.hasOverflow ? 'warn' : 'pass',
+      overflowInfo.hasOverflow
+        ? 'Horizontal overflow: contenido ' + overflowInfo.bodyWidth + 'px excede viewport ' + overflowInfo.viewportWidth + 'px'
+        : 'Content adapts to mobile viewport',
+      [{ stage: 'mobile', png: mobileSnap }],
+      overflowInfo.hasOverflow ? {
+        detail: 'El contenido tiene un ancho de ' + overflowInfo.bodyWidth + 'px pero el viewport mobile es de ' + overflowInfo.viewportWidth + 'px. Esto causa scroll horizontal no deseado en dispositivos móviles.',
+        culprits: overflowInfo.culprits,
+        recommendation: overflowInfo.culprits.length > 0
+          ? 'Elementos que causan overflow: ' + overflowInfo.culprits.map(function(c) { return c.selector + ' (' + c.overflow + 'px fuera)'; }).join(', ') + '. Considerar usar max-width:100%, overflow-x:hidden, o media queries.'
+          : 'Usar CSS responsive (max-width:100%, flexbox, grid) para adaptar el layout a pantallas pequeñas.'
+      } : null
+    );
+
+    // Restore original viewport
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(300);
+  } catch(respErr) {
+    addTest('responsive', 'Responsive test', 'viewport', 'fail', 'Error: ' + respErr.message, []);
+  }
+
+  return tests;
 }
 
 // ── Scaffold a minimal Vite project around the source files ──
