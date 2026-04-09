@@ -550,6 +550,98 @@ function AppInner() {
 
       {ghPanel&&<GitHubPanel T={T} dark={dark} t={t} onImportFiles={function(imported){setFiles(function(p){var existing=p.map(function(x){return x.name});return p.concat(imported.filter(function(x){return existing.indexOf(x.name)===-1}))});if(!sL&&imported.length>0&&imported[0].lang)setSL(imported[0].lang);setDet(null);setGhPanel(false)}} onClose={function(){setGhPanel(false)}} />}
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          ADVANCED AI CONFIGURATION PANEL
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {shCfg&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",background:T.modalBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",animation:"fadeIn .25s ease"}} onClick={function(e){if(e.target===e.currentTarget)setShCfg(false)}}>
+        <div style={{width:"90%",maxWidth:820,maxHeight:"88vh",borderRadius:16,background:dark?"rgba(17,22,32,.96)":"rgba(255,255,255,.97)",border:"1px solid "+(dark?"rgba(96,165,250,.15)":"rgba(37,99,235,.12)"),boxShadow:T.shadowLg,display:"flex",flexDirection:"column",overflow:"hidden",animation:"scaleIn .2s ease"}}>
+          {/* Header */}
+          <div style={{padding:"16px 24px",borderBottom:"1px solid "+T.bdL,display:"flex",alignItems:"center",justifyContent:"space-between",background:dark?"rgba(15,23,42,.6)":"rgba(239,246,255,.6)",flexShrink:0}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:800,color:T.nv,fontFamily:T.ui,letterSpacing:"-.02em"}}>{t.aiCfg}</div>
+              <div style={{fontSize:11,color:T.txD,marginTop:2}}>{t.aiDesc2}</div>
+            </div>
+            <button onClick={function(){setShCfg(false)}} style={{background:"none",border:"none",cursor:"pointer",padding:6,borderRadius:8,color:T.txD,fontSize:18,lineHeight:1,transition:"all .15s"}}>{"✕"}</button>
+          </div>
+          {/* Tabs */}
+          <div style={{display:"flex",gap:0,borderBottom:"1px solid "+T.bdL,flexShrink:0}}>
+            {[{k:"prompts",l:"Prompts"},{k:"pmap",l:t.pMaps}].map(function(tab){return <button key={tab.k} onClick={function(){setCfgTab(tab.k)}} style={{flex:1,padding:"10px 16px",background:cfgTab===tab.k?(dark?"rgba(37,99,235,.12)":"rgba(37,99,235,.06)"):"transparent",color:cfgTab===tab.k?T.bl:T.txM,fontSize:12,fontWeight:cfgTab===tab.k?700:500,fontFamily:T.ui,border:"none",borderBottom:cfgTab===tab.k?"2px solid "+T.bl:"2px solid transparent",cursor:"pointer",transition:"all .15s"}}>{tab.l}</button>})}
+          </div>
+          {/* Content */}
+          <div style={{flex:1,overflow:"auto",padding:"20px 24px"}}>
+            {cfgTab==="prompts"&&<div>
+              {/* Migration Prompt */}
+              <div style={{marginBottom:24}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.nv,marginBottom:4}}>{t.migP}</div>
+                <div style={{fontSize:10,fontWeight:600,color:T.bl,marginBottom:8,textTransform:"uppercase",letterSpacing:".04em"}}>{t.sysP}</div>
+                <textarea value={pr.mig.sys} onChange={function(e){setPr(function(p){var n=JSON.parse(JSON.stringify(p));n.mig.sys=e.target.value;return n})}} style={Object.assign({},S.input,{height:160,resize:"vertical",fontFamily:T.f,fontSize:11,lineHeight:"1.5",color:T.tx})}/>
+                <div style={{fontSize:10,fontWeight:600,color:T.bl,marginTop:16,marginBottom:8,textTransform:"uppercase",letterSpacing:".04em"}}>{t.guide}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {pr.mig.guide.map(function(g,i){return <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"8px 12px",borderRadius:8,background:T.cBg,border:"1px solid "+T.bdL}}>
+                    <span style={{fontSize:9,fontWeight:700,color:T.bl,background:T.blP,padding:"2px 6px",borderRadius:4,flexShrink:0,marginTop:1}}>{"P"+(i+1)}</span>
+                    <span style={{fontSize:11,color:T.txM,lineHeight:"1.4"}}>{g}</span>
+                  </div>})}
+                </div>
+              </div>
+              {/* Review Prompt */}
+              <div style={{marginBottom:24}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.nv,marginBottom:4}}>{t.revP}</div>
+                <div style={{fontSize:10,fontWeight:600,color:T.bl,marginBottom:8,textTransform:"uppercase",letterSpacing:".04em"}}>{t.sysP}</div>
+                <textarea value={pr.rev.sys} onChange={function(e){setPr(function(p){var n=JSON.parse(JSON.stringify(p));n.rev.sys=e.target.value;return n})}} style={Object.assign({},S.input,{height:160,resize:"vertical",fontFamily:T.f,fontSize:11,lineHeight:"1.5",color:T.tx})}/>
+                <div style={{fontSize:10,fontWeight:600,color:T.bl,marginTop:16,marginBottom:8,textTransform:"uppercase",letterSpacing:".04em"}}>{t.crit}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {pr.rev.crit.map(function(c,i){return <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"8px 12px",borderRadius:8,background:T.cBg,border:"1px solid "+T.bdL}}>
+                    <span style={{fontSize:9,fontWeight:700,color:T.g,background:T.okBg,padding:"2px 6px",borderRadius:4,flexShrink:0,marginTop:1}}>{"C"+(i+1)}</span>
+                    <span style={{fontSize:11,color:T.txM,lineHeight:"1.4"}}>{c}</span>
+                  </div>})}
+                </div>
+              </div>
+              {/* Variables info */}
+              <div style={{padding:"12px 16px",borderRadius:8,background:dark?"rgba(37,99,235,.08)":"rgba(37,99,235,.04)",border:"1px solid "+(dark?"rgba(96,165,250,.15)":"rgba(37,99,235,.1)")}}>
+                <div style={{fontSize:10,fontWeight:700,color:T.bl,marginBottom:6}}>{t.vars}</div>
+                <div style={{fontSize:10,color:T.txM,lineHeight:"1.6",fontFamily:T.f}}>
+                  {"{SOURCE}, {SOURCE_VER}, {TARGET}, {TARGET_VER}, {LANG}"}
+                </div>
+              </div>
+            </div>}
+            {cfgTab==="pmap"&&<div>
+              <div style={{fontSize:12,color:T.txM,marginBottom:16}}>{t.pMapsDesc}</div>
+              {sL&&tL&&<div style={{padding:"8px 12px",borderRadius:8,background:T.okBg,border:"1px solid "+T.okBd,marginBottom:16,fontSize:11,color:T.g,fontWeight:600}}>
+                {t.pMapsActive+": "+(LANGS[sL]||{}).n+" > "+(LANGS[tL]||{}).n}
+              </div>}
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {Object.keys(PARADIGM_MAPS).map(function(key){var pm=PARADIGM_MAPS[key];var cats=Object.keys(pm).filter(function(k){return k!=="title"});var total=cats.reduce(function(s,c){return s+(pm[c]||[]).length},0);var isActive=sL&&tL&&key===(sL+"\u2192"+tL);return <div key={key} style={Object.assign({},S.card,isActive?{borderColor:T.bl,boxShadow:"0 0 0 1px "+T.bl+"30"}:{})}>
+                  <div style={Object.assign({},S.cH,{cursor:"pointer"})} onClick={function(){setPMapEdit(function(p){return p===key?null:key})}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      {isActive&&<span style={{width:6,height:6,borderRadius:"50%",background:T.g,flexShrink:0}}/>}
+                      <span style={{fontSize:12,fontWeight:700,color:T.nv}}>{pm.title}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:10,color:T.txD}}>{total+" "+t.pConns}</span>
+                      <span style={{fontSize:11,color:T.txD,transform:pMapEdit===key?"rotate(180deg)":"rotate(0deg)",transition:"transform .2s"}}>{"\u25BC"}</span>
+                    </div>
+                  </div>
+                  {pMapEdit===key&&<div style={{padding:"12px 16px"}}>
+                    {cats.map(function(cat){return <div key={cat} style={{marginBottom:12}}>
+                      <div style={{fontSize:10,fontWeight:700,color:T.bl,textTransform:"uppercase",letterSpacing:".04em",marginBottom:6}}>{cat}</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                        {(pm[cat]||[]).map(function(item,i){return <div key={i} style={{fontSize:10,color:T.txM,padding:"4px 8px",borderRadius:4,background:T.cBg,fontFamily:T.f,lineHeight:"1.4",wordBreak:"break-word"}}>{item}</div>})}
+                      </div>
+                    </div>})}
+                  </div>}
+                </div>})}
+              </div>
+              {Object.keys(PARADIGM_MAPS).length===0&&<div style={{textAlign:"center",padding:"40px 0",color:T.txD,fontSize:12}}>{t.pMapsNone}</div>}
+            </div>}
+          </div>
+          {/* Footer */}
+          <div style={{padding:"12px 24px",borderTop:"1px solid "+T.bdL,display:"flex",justifyContent:"flex-end",gap:8,flexShrink:0,background:dark?"rgba(15,23,42,.4)":"rgba(249,250,251,.8)"}}>
+            <button onClick={function(){setPr(JSON.parse(JSON.stringify(DPROMPTS)))}} style={S.btn("r")}>{t.reset}</button>
+            <button onClick={function(){setShCfg(false)}} style={S.btn("p")}>{t.done||"OK"}</button>
+          </div>
+        </div>
+      </div>}
+
       {/* LANGUAGE TOOLTIP PORTAL */}
       <LanguageTooltip hovLang={hovLang} hovLangPos={hovLangPos} setHovLang={setHovLang} dark={dark} T={T} t={t} setSL={setSL} setTL={setTL} setVw={setVw} filesCount={files.length}/>
       {/* PERSISTENT MIGRATION BANNER */}
